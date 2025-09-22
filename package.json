@@ -1,0 +1,22 @@
+{
+  "name": "tracker",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "pnpm --parallel --filter web --filter api dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "build": "pnpm --filter web build && pnpm --filter api build",
+    "lint": "pnpm --recursive lint",
+    "lint:fix": "pnpm --recursive lint:fix",
+    "clean": "pnpm --recursive clean && rm -rf node_modules"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.17.0",
+  "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.10.0"
+  }
+}
