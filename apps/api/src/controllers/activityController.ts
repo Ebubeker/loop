@@ -1,212 +1,87 @@
 import { Request, Response } from 'express';
-import { ActivityWatchService } from '../services/activityWatchService';
 import { ActivityService } from '../services/activityService';
 import { TaskProcessingWorker } from '../services/taskProcessingWorker';
+import { supabase } from '../services/database';
 
 export class ActivityController {
-  static async getCurrentActivity(req: Request, res: Response) {
+  // NEW: Add activity manually
+  static async addActivity(req: Request, res: Response) {
     try {
-      const activity = await ActivityWatchService.getCurrentActivity();
-      res.json(activity);
-    } catch (error: any) {
-      console.error('Get current activity error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  static async getDetailedActivity(req: Request, res: Response) {
-    try {
-      const timeRange = parseInt(req.query.timeRange as string) || 3600;
-      const activity = await ActivityWatchService.getDetailedActivity(timeRange);
-      res.json(activity);
-    } catch (error: any) {
-      console.error('Get detailed activity error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  // NEW: Start activity monitoring for a user
-  static async startActivityMonitoring(req: Request, res: Response) {
-    try {
-      const { userId } = req.body;
+      const { userId, app, title, timestamp, duration, afkStatus, idleTime } = req.body;
       
-      if (!userId) {
+      if (!userId || !app || !title) {
         return res.status(400).json({ 
           success: false, 
-          error: 'User ID is required' 
+          error: 'userId, app, and title are required fields' 
         });
       }
 
-      console.log(`🚀 Starting activity monitoring for user: ${userId}`);
-      
-      const result = ActivityWatchService.startUserMonitoring(userId);
-      
-      res.json({
-        success: result.success,
-        message: result.message,
-        userId,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error: any) {
-      console.error('Start activity monitoring error:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
-      });
-    }
-  }
+      const activityData = {
+        user_id: userId,
+        timestamp: timestamp || new Date().toISOString(),
+        app: app,
+        title: title,
+        event_timestamp: timestamp || new Date().toISOString(),
+        event_duration: duration?.toString() || '0',
+        bucket_id: null,
+        bucket_created: null,
+        bucket_last_updated: null,
+        afk_status: afkStatus || 'not-afk',
+        idle_time: idleTime || 0
+      };
 
-  // NEW: Stop activity monitoring for a user
-  static async stopActivityMonitoring(req: Request, res: Response) {
-    try {
-      const { userId } = req.body;
-      
-      if (!userId) {
-        return res.status(400).json({ 
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .insert(activityData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error adding activity:', error);
+        return res.status(500).json({ 
           success: false, 
-          error: 'User ID is required' 
+          error: 'Failed to add activity to database' 
         });
       }
 
-      console.log(`⏹️ Stopping activity monitoring for user: ${userId}`);
-      
-      const result = ActivityWatchService.stopUserMonitoring(userId);
-      
-      res.json({
-        success: result.success,
-        message: result.message,
-        userId,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error: any) {
-      console.error('Stop activity monitoring error:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
-      });
-    }
-  }
-
-  // NEW: Get activity monitoring status for a user
-  static async getActivityMonitoringStatus(req: Request, res: Response) {
-    try {
-      const { userId } = req.params;
-      
-      if (!userId) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'User ID is required' 
-        });
-      }
-      
-      const status = ActivityWatchService.getUserMonitoringStatus(userId);
-      const activeSessions = ActivityWatchService.getActiveMonitoringSessions();
+      console.log(`✅ Activity added for user ${userId}: ${app} - ${title}`);
       
       res.json({
         success: true,
-        ...status,
-        activeSessions,
-        totalActiveSessions: activeSessions.length,
-        timestamp: new Date().toISOString()
+        message: 'Activity added successfully',
+        activity: data
       });
       
     } catch (error: any) {
-      console.error('Get activity monitoring status error:', error);
+      console.error('Add activity error:', error);
       res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
+        success: false, 
+        error: 'Internal server error' 
       });
-    }
-  }
-
-  // NEW: Get all active monitoring sessions
-  static async getAllActiveMonitoringSessions(req: Request, res: Response) {
-    try {
-      const activeSessions = ActivityWatchService.getActiveMonitoringSessions();
-      
-      res.json({
-        success: true,
-        activeSessions,
-        count: activeSessions.length,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error: any) {
-      console.error('Get active monitoring sessions error:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
-      });
-    }
-  }
-
-  static async getAllBucketTypes(req: Request, res: Response) {
-    try {
-      const bucketTypes = await ActivityWatchService.getAllBucketTypes();
-      res.json(bucketTypes);
-    } catch (error: any) {
-      console.error('Get bucket types error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  static async getWebActivity(req: Request, res: Response) {
-    try {
-      const timeRange = parseInt(req.query.timeRange as string) || 3600; // 1 hour default
-      const webActivity = await ActivityWatchService.getWebActivity(timeRange);
-      res.json(webActivity);
-    } catch (error: any) {
-      console.error('Get web activity error:', error);
-      res.status(500).json({ error: 'Internal server error' });
     }
   }
 
   static async getConsolidatedActivities(req: Request, res: Response) {
     try {
-      const consolidated = await ActivityService.getConsolidatedActivities();
-      res.json(consolidated);
+      const consolidatedData = await ActivityService.getConsolidatedActivities();
+      res.json(consolidatedData);
     } catch (error: any) {
       console.error('Get consolidated activities error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }
 
-  static async getAppsCategories(req: Request, res: Response) {
-    try {
-      const categories = await ActivityWatchService.getAppsCategories();
-      res.json(categories);
-    } catch (error: any) {
-      console.error('Get apps categories error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  static async getRecentEvents(req: Request, res: Response) {
-    try {
-      const events = await ActivityWatchService.getRecentEvents();
-      res.json(events);
-    } catch (error: any) {
-      console.error('Get recent events error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
   static async getRawActivities(req: Request, res: Response) {
     try {
-      const limit = parseInt(req.query.limit as string) || 50;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const timeRange = req.query.timeRange as string;
       
-      const activities = await ActivityService.getActivities(limit);
-      
+      const activities = await ActivityService.getActivities(limit, timeRange);
       res.json({
-        success: true,
-        activities: activities,
-        count: activities.length
+        activities,
+        count: activities.length,
+        limit,
+        timeRange: timeRange || 'all'
       });
     } catch (error: any) {
       console.error('Get raw activities error:', error);
@@ -214,7 +89,7 @@ export class ActivityController {
     }
   }
 
-  // Task Processing Methods
+  // Task processing endpoints
   static async processUserTasks(req: Request, res: Response) {
     try {
       const { userId } = req.params;
@@ -226,11 +101,13 @@ export class ActivityController {
         });
       }
 
+      console.log(`🔄 Processing tasks for user: ${userId}`);
+      
       await ActivityService.processUserActivities(userId);
       
       res.json({
         success: true,
-        message: 'User activities processed successfully',
+        message: `Processing completed for user ${userId}`,
         userId,
         timestamp: new Date().toISOString()
       });
@@ -238,7 +115,7 @@ export class ActivityController {
     } catch (error: any) {
       console.error('Process user tasks error:', error);
       res.status(500).json({ 
-        success: false,
+        success: false, 
         error: 'Internal server error',
         message: error.message 
       });
@@ -255,17 +132,19 @@ export class ActivityController {
           error: 'User ID is required' 
         });
       }
-
-      const status = await ActivityService.getCurrentTaskStatus(userId);
       
-      res.json(status);
+      const status = ActivityService.getCurrentTaskStatus(userId);
+      res.json({
+        success: true,
+        userId,
+        status
+      });
       
     } catch (error: any) {
       console.error('Get current task status error:', error);
       res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
+        success: false, 
+        error: 'Internal server error' 
       });
     }
   }
@@ -281,30 +160,34 @@ export class ActivityController {
           error: 'User ID is required' 
         });
       }
-
+      
+      console.log(`📋 Getting processed tasks for user: ${userId} (limit: ${limit})`);
+      
       const tasks = await ActivityService.getProcessedTasks(userId, limit);
       
       res.json({
         success: true,
+        userId,
         tasks,
         count: tasks.length,
-        userId,
-        timestamp: new Date().toISOString()
+        limit
       });
       
     } catch (error: any) {
       console.error('Get processed tasks error:', error);
       res.status(500).json({ 
-        success: false,
+        success: false, 
         error: 'Internal server error',
         message: error.message 
       });
     }
   }
 
-  // Task Processing Worker Methods
+  // Task processing worker endpoints
   static async startTaskWorker(req: Request, res: Response) {
     try {
+      console.log('🚀 Starting task processing worker...');
+      
       TaskProcessingWorker.start();
       const status = TaskProcessingWorker.getStatus();
       
@@ -318,7 +201,7 @@ export class ActivityController {
     } catch (error: any) {
       console.error('Start task worker error:', error);
       res.status(500).json({ 
-        success: false,
+        success: false, 
         error: 'Internal server error',
         message: error.message 
       });
@@ -327,6 +210,8 @@ export class ActivityController {
 
   static async stopTaskWorker(req: Request, res: Response) {
     try {
+      console.log('🛑 Stopping task processing worker...');
+      
       TaskProcessingWorker.stop();
       const status = TaskProcessingWorker.getStatus();
       
@@ -340,7 +225,7 @@ export class ActivityController {
     } catch (error: any) {
       console.error('Stop task worker error:', error);
       res.status(500).json({ 
-        success: false,
+        success: false, 
         error: 'Internal server error',
         message: error.message 
       });
@@ -353,16 +238,15 @@ export class ActivityController {
       
       res.json({
         success: true,
-        ...status,
+        status: status,
         timestamp: new Date().toISOString()
       });
       
     } catch (error: any) {
       console.error('Get task worker status error:', error);
       res.status(500).json({ 
-        success: false,
-        error: 'Internal server error',
-        message: error.message 
+        success: false, 
+        error: 'Internal server error' 
       });
     }
   }
@@ -377,7 +261,9 @@ export class ActivityController {
           error: 'User ID is required' 
         });
       }
-
+      
+      console.log(`👤 Adding user ${userId} to task processing worker`);
+      
       TaskProcessingWorker.addUser(userId);
       
       res.json({
@@ -390,7 +276,7 @@ export class ActivityController {
     } catch (error: any) {
       console.error('Add user to worker error:', error);
       res.status(500).json({ 
-        success: false,
+        success: false, 
         error: 'Internal server error',
         message: error.message 
       });

@@ -2,7 +2,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import routes from './routes';
-import { ActivityWatchService } from './services/activityWatchService';
 import { TaskProcessingWorker } from './services/taskProcessingWorker';
 
 dotenv.config({ path: '../../.env' });
@@ -16,13 +15,6 @@ app.use(express.json());
 
 // Routes
 app.use(routes);
-
-// Initialize ActivityWatch on startup
-try {
-  ActivityWatchService.startActivityWatch();
-} catch (error) {
-  console.error('Failed to start ActivityWatch:', error);
-}
 
 // Start task processing worker if enabled
 if (process.env.AUTO_START_TASK_PROCESSING === 'true') {
@@ -47,5 +39,10 @@ app.listen(port, () => {
   console.log(`   - Manual control: POST /api/activity/worker/start|stop`);
   console.log(`   - Status check: GET /api/activity/worker/status`);
   console.log(`   - Process user: POST /api/activity/process/{userId}`);
+  
+  console.log('\n📝 Manual Activity Tracking:');
+  console.log('   - Add activity: POST /api/activity/add');
+  console.log('   - Get activities: GET /api/activity/raw');
+  console.log('   - Get consolidated: GET /api/activity/consolidated');
   console.log('');
 }); 

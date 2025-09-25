@@ -3,24 +3,12 @@ import { ActivityController } from '../controllers/activityController';
 
 const router: Router = Router();
 
-// Current activity
-router.get('/current', ActivityController.getCurrentActivity);
-router.get('/detailed', ActivityController.getDetailedActivity);
+// NEW: Add activity manually
+router.post('/add', ActivityController.addActivity);
 
-// Activity monitoring endpoints (for the frontend /api/start call)
-router.post('/monitoring/start', ActivityController.startActivityMonitoring);
-router.post('/monitoring/stop', ActivityController.stopActivityMonitoring);
-router.get('/monitoring/status/:userId', ActivityController.getActivityMonitoringStatus);
-router.get('/monitoring/sessions', ActivityController.getAllActiveMonitoringSessions);
-
-// Bucket information
-router.get('/buckets', ActivityController.getAllBucketTypes);
-router.get('/web', ActivityController.getWebActivity);
-router.get('/apps', ActivityController.getAppsCategories);
-router.get('/recent', ActivityController.getRecentEvents);
-
-// Raw activities
+// Raw activities from database
 router.get('/raw', ActivityController.getRawActivities);
+router.get('/consolidated', ActivityController.getConsolidatedActivities);
 
 // Task processing endpoints
 router.post('/process/:userId', ActivityController.processUserTasks);
