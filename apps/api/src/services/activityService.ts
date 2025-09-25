@@ -480,25 +480,62 @@ export class ActivityService {
   /**
    * Get processed tasks for a user
    */
+  // static async getProcessedTasks(userId: string, limit: number = 50): Promise<any> {
+  //   try {
+  //     const { data, error } = await supabase
+  //       .from('processed_tasks')
+  //       .select('*')
+  //       .eq('user_id', userId)
+  //       .order('created_at', { ascending: true })
+  //       .limit(limit);
+
+  //     if (error) {
+  //       throw new Error(`Failed to fetch processed tasks: ${error.message}`);
+  //     }
+
+  //     return {
+  //       success: true,
+  //       tasks: data || [],
+  //       count: data?.length || 0
+  //     };
+
+  //   } catch (error: any) {
+  //     console.error('Get processed tasks error:', error);
+  //     return {
+  //       success: false,
+  //       error: error.message || 'Failed to fetch processed tasks',
+  //       tasks: []
+  //     };
+  //   }
+  // }
+
   static async getProcessedTasks(userId: string, limit: number = 50): Promise<any> {
     try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // start of today
+  
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1); // start of tomorrow
+  
       const { data, error } = await supabase
         .from('processed_tasks')
         .select('*')
         .eq('user_id', userId)
+        .gte('created_at', today.toISOString())   // created today or later
+        .lt('created_at', tomorrow.toISOString()) // but before tomorrow
         .order('created_at', { ascending: true })
         .limit(limit);
-
+  
       if (error) {
         throw new Error(`Failed to fetch processed tasks: ${error.message}`);
       }
-
+  
       return {
         success: true,
         tasks: data || [],
         count: data?.length || 0
       };
-
+  
     } catch (error: any) {
       console.error('Get processed tasks error:', error);
       return {
@@ -508,6 +545,7 @@ export class ActivityService {
       };
     }
   }
+  
 
   /**
    * Get current task status for a user

@@ -8,6 +8,8 @@
     "dev:web": "pnpm --filter web dev",
     "dev:api": "pnpm --filter api dev",
     "build": "pnpm --filter web build && pnpm --filter api build",
+    "build:api": "pnpm --filter api build",
+    "start:api": "cd apps/api && pnpm start",
     "lint": "pnpm --recursive lint",
     "lint:fix": "pnpm --recursive lint:fix",
     "clean": "pnpm --recursive clean && rm -rf node_modules"
