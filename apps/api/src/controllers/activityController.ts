@@ -7,7 +7,17 @@ export class ActivityController {
   // NEW: Add activity manually
   static async addActivity(req: Request, res: Response) {
     try {
-      const { userId, app, title, timestamp, duration, afkStatus, idleTime } = req.body;
+      const { 
+        userId, 
+        app, 
+        title, 
+        timestamp, 
+        duration, 
+        afkStatus, 
+        idleTime,
+        windowDetails,
+        processInfo 
+      } = req.body;
       
       if (!userId || !app || !title) {
         return res.status(400).json({ 
@@ -15,7 +25,7 @@ export class ActivityController {
           error: 'userId, app, and title are required fields' 
         });
       }
-
+  
       const activityData = {
         user_id: userId,
         timestamp: timestamp || new Date().toISOString(),
@@ -27,15 +37,28 @@ export class ActivityController {
         bucket_created: null,
         bucket_last_updated: null,
         afk_status: afkStatus || 'not-afk',
-        idle_time: idleTime || 0
+        idle_time: idleTime || 0,
+        
+        // Enhanced window information
+        window_bounds: windowDetails?.bounds ? JSON.stringify(windowDetails.bounds) : null,
+        is_visible: windowDetails?.isVisible ?? true,
+        is_minimized: windowDetails?.isMinimized ?? false,
+        is_maximized: windowDetails?.isMaximized ?? false,
+        process_id: windowDetails?.processId || null,
+        
+        // Enhanced process information
+        top_processes: processInfo?.topProcesses ? JSON.stringify(processInfo.topProcesses) : null,
+        total_processes: processInfo?.totalProcesses || 0,
+        system_load: processInfo?.systemLoad || 0,
+        process_categories: processInfo?.categories ? JSON.stringify(processInfo.categories) : null
       };
-
+  
       const { data, error } = await supabase
         .from('activity_logs')
         .insert(activityData)
         .select()
         .single();
-
+  
       if (error) {
         console.error('Error adding activity:', error);
         return res.status(500).json({ 
@@ -43,17 +66,22 @@ export class ActivityController {
           error: 'Failed to add activity to database' 
         });
       }
-
-      console.log(`✅ Activity added for user ${userId}: ${app} - ${title}`);
+  
+      console.log(`✅ Enhanced activity added for user ${userId}: ${app} - ${title}`, {
+        processes: processInfo?.totalProcesses || 0,
+        systemLoad: processInfo?.systemLoad || 0,
+        windowState: windowDetails?.isMaximized ? 'maximized' : 
+                     windowDetails?.isMinimized ? 'minimized' : 'normal'
+      });
       
       res.json({
         success: true,
-        message: 'Activity added successfully',
+        message: 'Enhanced activity added successfully',
         activity: data
       });
       
     } catch (error: any) {
-      console.error('Add activity error:', error);
+      console.error('Add enhanced activity error:', error);
       res.status(500).json({ 
         success: false, 
         error: 'Internal server error' 
