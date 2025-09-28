@@ -11,9 +11,11 @@ router.get('/raw', ActivityController.getRawActivities);
 router.get('/consolidated', ActivityController.getConsolidatedActivities);
 
 // Task processing endpoints
+router.post('/addProcessedTask', ActivityController.addProcessedTask);
 router.post('/process/:userId', ActivityController.processUserTasks);
 router.get('/status/:userId', ActivityController.getCurrentTaskStatus);
 router.get('/tasks/:userId', ActivityController.getProcessedTasks);
+router.post('/check-inactive/:userId', ActivityController.checkInactiveTasks);
 
 // Task processing worker endpoints
 router.post('/worker/start', ActivityController.startTaskWorker);

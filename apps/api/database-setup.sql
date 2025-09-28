@@ -40,6 +40,67 @@ CREATE POLICY "Users can update own timelines" ON generated_timelines
 CREATE POLICY "Users can delete own timelines" ON generated_timelines
     FOR DELETE USING (auth.uid() = user_id);
 
+-- =====================================================
+-- Processed Tasks Table Enhancement for Task Linking
+-- =====================================================
+
+-- Add task_id column to processed_tasks table for linking to tasks table
+-- This allows processed tasks (from activity analysis) to be linked to user-defined tasks
+ALTER TABLE processed_tasks 
+ADD COLUMN IF NOT EXISTS task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
+
+-- Create index for better performance on task_id lookups
+CREATE INDEX IF NOT EXISTS idx_processed_tasks_task_id ON processed_tasks(task_id);
+
+-- Create composite index for user + task_id queries
+CREATE INDEX IF NOT EXISTS idx_processed_tasks_user_task ON processed_tasks(user_id, task_id);
+
+-- Add helpful comment for the new column
+COMMENT ON COLUMN processed_tasks.task_id IS 'Links processed task to a user-defined task from tasks table';
+
+-- =====================================================
+-- Time Tracking Sessions Table
+-- =====================================================
+
+-- Create the time_tracking_sessions table
+CREATE TABLE IF NOT EXISTS time_tracking_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ,
+    duration_seconds INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_time_tracking_user_id ON time_tracking_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_time_tracking_start_time ON time_tracking_sessions(start_time);
+CREATE INDEX IF NOT EXISTS idx_time_tracking_created_at ON time_tracking_sessions(created_at);
+
+-- Create composite index for common queries
+CREATE INDEX IF NOT EXISTS idx_time_tracking_user_time ON time_tracking_sessions(user_id, start_time DESC);
+
+-- Add Row Level Security (RLS) if auth is enabled
+ALTER TABLE time_tracking_sessions ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for time tracking sessions (if using Supabase auth)
+CREATE POLICY "Users can view own sessions" ON time_tracking_sessions
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own sessions" ON time_tracking_sessions
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own sessions" ON time_tracking_sessions
+    FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own sessions" ON time_tracking_sessions
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- Add helpful comments
+COMMENT ON TABLE time_tracking_sessions IS 'Stores manual time tracking sessions for users';
+COMMENT ON COLUMN time_tracking_sessions.duration_seconds IS 'Calculated duration in seconds, updated when end_time is set';
+
 -- Create a trigger to automatically update the updated_at column
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$

@@ -1,4 +1,5 @@
 import { supabase } from './database';
+import { GeminiService } from './geminiService';
 
 interface ProcessedTask {
   id?: string;
@@ -10,6 +11,7 @@ interface ProcessedTask {
   status: 'active' | 'completed' | 'interrupted';
   duration_minutes: number;
   activity_summaries: any[];
+  task_id?: string; // Link to tasks table
   created_at?: string;
   updated_at?: string;
 }
@@ -382,6 +384,9 @@ export class ActivityService {
     const userState = this.currentTasks.get(userId)!;
     const now = new Date().toISOString();
 
+    // Try to find a matching task from the tasks table
+    const matchingTaskId = await this.findMatchingTask(userId, summary);
+
     const newTask: ProcessedTask = {
       user_id: userId,
       task_title: summary.title || 'Untitled Task',
@@ -389,12 +394,17 @@ export class ActivityService {
       start_time: now,
       status: 'active',
       duration_minutes: 1,
-      activity_summaries: [summary]
+      activity_summaries: [summary],
+      task_id: matchingTaskId || undefined // Link to existing task if found
     };
 
     userState.current_task = newTask;
     
-    console.log(`🆕 Started new task for user ${userId}: "${newTask.task_title}"`);
+    if (matchingTaskId) {
+      console.log(`🆕 Started new task for user ${userId}: "${newTask.task_title}" (linked to task ID: ${matchingTaskId})`);
+    } else {
+      console.log(`🆕 Started new task for user ${userId}: "${newTask.task_title}" (no existing task match found)`);
+    }
   }
 
   /**
@@ -425,19 +435,59 @@ export class ActivityService {
     task.status = status;
     task.end_time = new Date().toISOString();
 
-    // Save to database
+    // Prepare the task object for database insertion
+    const taskObject = {
+      user_id: task.user_id,
+      task_title: task.task_title,
+      task_description: task.task_description,
+      start_time: task.start_time,
+      end_time: task.end_time,
+      status: task.status,
+      duration_minutes: task.duration_minutes,
+      activity_summaries: task.activity_summaries,
+      task_id: task.task_id || null, // Include linked task ID if available
+      created_at: new Date().toISOString()
+    };
+
+    // Fetch linked task information if available for better summary generation
+    let linkedTask = null;
+    if (task.task_id) {
+      try {
+        const { data, error } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('id', task.task_id)
+          .single();
+        
+        if (!error && data) {
+          linkedTask = data;
+          console.log(`📋 Retrieved linked task info for summary: "${linkedTask.name}"`);
+        } else {
+          console.warn(`⚠️ Failed to fetch linked task ${task.task_id}:`, error);
+        }
+      } catch (error) {
+        console.warn(`⚠️ Error fetching linked task ${task.task_id}:`, error);
+      }
+    }
+
+    // Generate pretty log summary using Gemini with linked task context
+    let logPrettyDesc = '';
+    try {
+      logPrettyDesc = await GeminiService.generateTaskLogSummary(taskObject, linkedTask);
+      if (linkedTask) {
+        console.log(`🤖 Generated enhanced summary with linked task context for "${linkedTask.name}"`);
+      }
+    } catch (error) {
+      console.warn(`⚠️ Failed to generate log summary for task ${task.task_title}:`, error);
+      logPrettyDesc = `Task: ${task.task_title} (${task.duration_minutes} min, ${status})${linkedTask ? ` [linked to: ${linkedTask.name}]` : ''}`;
+    }
+
+    // Save to database with log summary
     const { error } = await supabase
       .from('processed_tasks')
       .insert({
-        user_id: task.user_id,
-        task_title: task.task_title,
-        task_description: task.task_description,
-        start_time: task.start_time,
-        end_time: task.end_time,
-        status: task.status,
-        duration_minutes: task.duration_minutes,
-        activity_summaries: task.activity_summaries,
-        created_at: new Date().toISOString()
+        ...taskObject,
+        log_pretty_desc: logPrettyDesc
       });
 
       if (error) {
@@ -445,7 +495,10 @@ export class ActivityService {
       throw new Error(`Failed to save processed task: ${error.message}`);
     }
 
-    console.log(`💾 Finalized task for user ${userId}: "${task.task_title}" (${task.duration_minutes} min, ${status})`);
+    console.log(`💾 Finalized task for user ${userId}: "${task.task_title}" (${task.duration_minutes} min, ${status})${task.task_id ? ` [linked to task: ${task.task_id}]` : ' [standalone task]'}`);
+    
+    // Check for inactive tasks and auto-complete them after creating new processed log
+    await this.checkAndCompleteInactiveTasks(userId);
     
     // Clear current task
     userState.current_task = null;
@@ -455,60 +508,225 @@ export class ActivityService {
    * Check if new activity is related to current task using AI
    */
   private static async isActivityRelatedToCurrentTask(userId: string, newSummary: any): Promise<boolean> {
-    try {
-      const userState = this.currentTasks.get(userId)!;
-      
-      if (!userState.current_task) {
-        return false;
-      }
+    
+    const userState = this.currentTasks.get(userId);
+    if (!userState || !userState.current_task) {
+      return false;
+    }
 
-      // Import GeminiService to check task relation
+    try {
+      // Import GeminiService to avoid circular dependencies
       const { GeminiService } = await import('./geminiService');
       
-      return await GeminiService.compareTaskRelatedness(
-        userState.current_task,
+      const isRelated = await GeminiService.compareTaskRelatedness(
+        userState.current_task, 
         newSummary
       );
-      
+
+      return isRelated;
+
     } catch (error: any) {
-      console.error(`❌ Error checking task relatedness for user ${userId}:`, error);
-      // Default to continuing current task if AI fails
+      console.warn(`⚠️ Failed to check task relatedness for user ${userId}:`, error);
+      // Default to true to continue current task if AI fails
       return true;
+    }
+  }
+
+  /**
+   * Get all active tasks for a user from the tasks table
+   */
+  private static async getUserTasks(userId: string): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error(`❌ Failed to fetch tasks for user ${userId}:`, error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error: any) {
+      console.error(`❌ Error fetching tasks for user ${userId}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Find a matching task for the current activity summary using AI
+   */
+  private static async findMatchingTask(userId: string, activitySummary: any): Promise<string | null> {
+    try {
+      const userTasks = await this.getUserTasks(userId);
+
+      console.log('userTasks', userTasks);
+      
+      if (!userTasks || userTasks.length === 0) {
+        console.log(`📋 No tasks found for user ${userId} to match against`);
+        return null;
+      }
+
+      console.log(`🔍 Attempting to match activity "${activitySummary.title}" against ${userTasks.length} user tasks`);
+
+      // Import GeminiService to avoid circular dependencies
+      const { GeminiService } = await import('./geminiService');
+      
+      const matchResult = await GeminiService.findBestTaskMatch(userTasks, activitySummary);
+      
+      console.log(`🤖 AI matching result:`, {
+        success: matchResult.success,
+        taskId: matchResult.taskId,
+        taskName: matchResult.taskName,
+        confidence: matchResult.confidence,
+        reason: matchResult.reason
+      });
+      
+      if (matchResult.success && matchResult.taskId && matchResult.confidence > 0.7) {
+        console.log(`🎯 Found matching task for user ${userId}: "${matchResult.taskName}" (ID: ${matchResult.taskId}, confidence: ${matchResult.confidence})`);
+        console.log(`   Reason: ${matchResult.reason}`);
+        return matchResult.taskId;
+      }
+
+      console.log(`🔍 No suitable match found for user ${userId} activity: "${activitySummary.title}" (confidence: ${matchResult.confidence || 0})`);
+      if (matchResult.reason) {
+        console.log(`   Reason: ${matchResult.reason}`);
+      }
+      return null;
+
+    } catch (error: any) {
+      console.warn(`⚠️ Failed to find matching task for user ${userId}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Check for inactive tasks and auto-complete them if not worked on for 2+ hours
+   * Called every time a new processed log is created
+   */
+  private static async checkAndCompleteInactiveTasks(userId: string): Promise<void> {
+    try {
+      console.log(`🕒 Checking for inactive tasks to auto-complete for user ${userId}`);
+
+      // Get all tasks for the user
+      const userTasks = await this.getUserTasks(userId);
+      
+      if (!userTasks || userTasks.length === 0) {
+        console.log(`📋 No tasks found for user ${userId} - skipping inactive task check`);
+        return;
+      }
+
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
+      const tasksToComplete: string[] = [];
+      const taskStatusMap: { [taskId: string]: { name: string, lastWorked: string | null, hoursSinceWork: number | null } } = {};
+
+      // Check each task's last activity
+      for (const task of userTasks) {
+        // Skip already completed tasks
+        if (task.status === 'completed') {
+          continue;
+        }
+
+        try {
+          // Get the most recent processed log for this task
+          const { data: lastProcessedLog, error } = await supabase
+            .from('processed_tasks')
+            .select('created_at, end_time')
+            .eq('user_id', userId)
+            .eq('task_id', task.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+            console.warn(`⚠️ Error checking last activity for task ${task.id}:`, error);
+            continue;
+          }
+
+          let lastWorkedTime: Date | null = null;
+          let lastWorkedString: string | null = null;
+
+          if (lastProcessedLog) {
+            // Use end_time if available, otherwise created_at
+            const timeToUse = lastProcessedLog.end_time || lastProcessedLog.created_at;
+            lastWorkedTime = new Date(timeToUse);
+            lastWorkedString = timeToUse;
+          }
+
+          // Calculate hours since last work
+          let hoursSinceWork: number | null = null;
+          if (lastWorkedTime) {
+            hoursSinceWork = (Date.now() - lastWorkedTime.getTime()) / (1000 * 60 * 60);
+          }
+
+          // Store status for logging
+          taskStatusMap[task.id] = {
+            name: task.name,
+            lastWorked: lastWorkedString,
+            hoursSinceWork: hoursSinceWork
+          };
+
+          console.log(hoursSinceWork, twoHoursAgo)
+
+          // Check if task should be auto-completed
+          if (lastWorkedTime && lastWorkedTime < twoHoursAgo) {
+            tasksToComplete.push(task.id);
+            console.log(`⏰ Task "${task.name}" hasn't been worked on for ${hoursSinceWork?.toFixed(1)} hours - marking for completion`);
+          } else if (!lastWorkedTime) {
+            console.log(`📝 Task "${task.name}" has no processed logs yet - keeping active`);
+          } else {
+            console.log(`⚡ Task "${task.name}" was worked on ${hoursSinceWork?.toFixed(1)} hours ago - still active`);
+          }
+
+        } catch (error) {
+          console.warn(`⚠️ Error processing task ${task.id} for auto-completion:`, error);
+        }
+      }
+
+      // Auto-complete the inactive tasks
+      if (tasksToComplete.length > 0) {
+        console.log(`🎯 Auto-completing ${tasksToComplete.length} inactive tasks`);
+
+        for (const taskId of tasksToComplete) {
+          try {
+            const { error } = await supabase
+              .from('tasks')
+              .update({
+                status: 'completed',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', taskId)
+              .eq('user_id', userId); // Extra safety check
+
+            if (error) {
+              console.error(`❌ Failed to auto-complete task ${taskId}:`, error);
+            } else {
+              const taskInfo = taskStatusMap[taskId];
+              console.log(`✅ Auto-completed task "${taskInfo.name}" (inactive for ${taskInfo.hoursSinceWork?.toFixed(1)} hours)`);
+            }
+          } catch (error) {
+            console.error(`❌ Error auto-completing task ${taskId}:`, error);
+          }
+        }
+      } else {
+        console.log(`✨ No tasks need auto-completion for user ${userId}`);
+      }
+
+      // Log summary
+      const activeTasksCount = Object.keys(taskStatusMap).length - tasksToComplete.length;
+      console.log(`📊 Task activity summary for user ${userId}: ${activeTasksCount} active, ${tasksToComplete.length} auto-completed`);
+
+    } catch (error: any) {
+      console.error(`❌ Error in checkAndCompleteInactiveTasks for user ${userId}:`, error);
+      // Don't throw - this is a background process that shouldn't break the main flow
     }
   }
 
   /**
    * Get processed tasks for a user
    */
-  // static async getProcessedTasks(userId: string, limit: number = 50): Promise<any> {
-  //   try {
-  //     const { data, error } = await supabase
-  //       .from('processed_tasks')
-  //       .select('*')
-  //       .eq('user_id', userId)
-  //       .order('created_at', { ascending: true })
-  //       .limit(limit);
-
-  //     if (error) {
-  //       throw new Error(`Failed to fetch processed tasks: ${error.message}`);
-  //     }
-
-  //     return {
-  //       success: true,
-  //       tasks: data || [],
-  //       count: data?.length || 0
-  //     };
-
-  //   } catch (error: any) {
-  //     console.error('Get processed tasks error:', error);
-  //     return {
-  //       success: false,
-  //       error: error.message || 'Failed to fetch processed tasks',
-  //       tasks: []
-  //     };
-  //   }
-  // }
-
   static async getProcessedTasks(userId: string, limit: number = 50): Promise<any> {
     try {
       const today = new Date();
@@ -517,9 +735,19 @@ export class ActivityService {
       const tomorrow = new Date(today);
       tomorrow.setDate(today.getDate() + 1); // start of tomorrow
   
+      // Get processed tasks with linked task information
       const { data, error } = await supabase
         .from('processed_tasks')
-        .select('*')
+        .select(`
+          *,
+          linked_task:task_id (
+            id,
+            name,
+            description,
+            category,
+            status
+          )
+        `)
         .eq('user_id', userId)
         .gte('created_at', today.toISOString())   // created today or later
         .lt('created_at', tomorrow.toISOString()) // but before tomorrow
@@ -529,11 +757,22 @@ export class ActivityService {
       if (error) {
         throw new Error(`Failed to fetch processed tasks: ${error.message}`);
       }
+
+      // Transform the data to include linked task info more clearly
+      const tasksWithLinkedInfo = (data || []).map(task => ({
+        ...task,
+        has_linked_task: !!task.task_id,
+        linked_task_name: task.linked_task?.name || null,
+        linked_task_category: task.linked_task?.category || null,
+        linked_task_status: task.linked_task?.status || null
+      }));
   
       return {
         success: true,
-        tasks: data || [],
-        count: data?.length || 0
+        tasks: tasksWithLinkedInfo,
+        count: tasksWithLinkedInfo.length,
+        linked_count: tasksWithLinkedInfo.filter(t => t.has_linked_task).length,
+        standalone_count: tasksWithLinkedInfo.filter(t => !t.has_linked_task).length
       };
   
     } catch (error: any) {
@@ -581,6 +820,31 @@ export class ActivityService {
       
     } catch (error: any) {
       console.error(`❌ Error finalizing tasks on stop for user ${userId}:`, error);
+    }
+  }
+
+  /**
+   * Manually check and complete inactive tasks (public method for API access)
+   * @param userId - User ID to check tasks for
+   * @returns Summary of completed tasks
+   */
+  static async manuallyCheckInactiveTasks(userId: string): Promise<any> {
+    try {
+      console.log(`🔄 Manual inactive task check requested for user ${userId}`);
+      await this.checkAndCompleteInactiveTasks(userId);
+      
+      return {
+        success: true,
+        message: `Inactive task check completed for user ${userId}`,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error: any) {
+      console.error(`❌ Error in manual inactive task check for user ${userId}:`, error);
+      return {
+        success: false,
+        error: error.message || 'Failed to check inactive tasks',
+        timestamp: new Date().toISOString()
+      };
     }
   }
 } 
