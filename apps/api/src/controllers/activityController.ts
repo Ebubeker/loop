@@ -266,6 +266,52 @@ export class ActivityController {
     }
   }
 
+  // NEW: Get no-focus tasks (activities with no assigned task and >5 min duration)
+  static async getNoFocusTasks(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 50;
+      const dateFilter = req.query.dateFilter as 'today' | 'week' | 'month';
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      console.log(`🚨 Getting no-focus tasks for user: ${userId} (limit: ${limit}, filter: ${dateFilter || 'none'})`);
+
+      const result = await ActivityService.getNoFocusTasks(userId, limit, dateFilter);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          userId,
+          no_focus_tasks: result.no_focus_tasks,
+          count: result.count,
+          total_no_focus_minutes: result.total_no_focus_minutes,
+          total_no_focus_hours: result.total_no_focus_hours,
+          filter_applied: result.filter_applied,
+          limit
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: result.error
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Get no-focus tasks error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+  }
+
   // Task processing worker endpoints
   static async startTaskWorker(req: Request, res: Response) {
     try {

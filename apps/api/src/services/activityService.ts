@@ -12,6 +12,7 @@ interface ProcessedTask {
   duration_minutes: number;
   activity_summaries: any[];
   task_id?: string; // Link to tasks table
+  no_focus?: boolean; // Flag for activities with no task assignment and >5 min duration
   created_at?: string;
   updated_at?: string;
 }
@@ -433,7 +434,29 @@ export class ActivityService {
 
     const task = userState.current_task;
     task.status = status;
-    task.end_time = new Date().toISOString();
+    
+    // Ensure end_time is always after the last activity timestamp
+    const currentTime = new Date();
+    let endTime = currentTime.toISOString();
+    
+    // Check if there are activity summaries and get the latest timestamp
+    if (task.activity_summaries && task.activity_summaries.length > 0) {
+      const lastActivityTimestamp = Math.max(
+        ...task.activity_summaries.map(activity => new Date(activity.timestamp || activity.event_timestamp || 0).getTime())
+      );
+      const lastActivityTime = new Date(lastActivityTimestamp);
+      
+      // If the last activity is newer than current time, set end_time to be 1 second after
+      if (lastActivityTime.getTime() >= currentTime.getTime()) {
+        endTime = new Date(lastActivityTime.getTime() + 1000).toISOString();
+      }
+    }
+    
+    task.end_time = endTime;
+
+    // Check for "no focus" flag - activities with no assigned task and duration > 5 minutes
+    // const isNoFocus = !task.task_id && task.duration_minutes > 1;
+    const isNoFocus = !task.task_id && task.duration_minutes > 5;
 
     // Prepare the task object for database insertion
     const taskObject = {
@@ -446,6 +469,7 @@ export class ActivityService {
       duration_minutes: task.duration_minutes,
       activity_summaries: task.activity_summaries,
       task_id: task.task_id || null, // Include linked task ID if available
+      no_focus: isNoFocus, // Flag activities with no task assignment and >5 min duration
       created_at: new Date().toISOString()
     };
 
@@ -495,7 +519,7 @@ export class ActivityService {
       throw new Error(`Failed to save processed task: ${error.message}`);
     }
 
-    console.log(`💾 Finalized task for user ${userId}: "${task.task_title}" (${task.duration_minutes} min, ${status})${task.task_id ? ` [linked to task: ${task.task_id}]` : ' [standalone task]'}`);
+    console.log(`💾 Finalized task for user ${userId}: "${task.task_title}" (${task.duration_minutes} min, ${status})${task.task_id ? ` [linked to task: ${task.task_id}]` : ' [standalone task]'}${isNoFocus ? ' 🚨 [NO FOCUS - >5min unassigned]' : ''}`);
     
     // Check for inactive tasks and auto-complete them after creating new processed log
     await this.checkAndCompleteInactiveTasks(userId);
@@ -537,10 +561,18 @@ export class ActivityService {
    */
   private static async getUserTasks(userId: string): Promise<any[]> {
     try {
+      // Get today's date boundaries
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Start of today
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1); // Start of tomorrow
+
       const { data, error } = await supabase
         .from('tasks')
         .select('*')
         .eq('user_id', userId)
+        .gte('created_at', today.toISOString())
+        .lt('created_at', tomorrow.toISOString())
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -784,7 +816,71 @@ export class ActivityService {
       };
     }
   }
-  
+
+  /**
+   * Get no-focus tasks for a user (tasks with no assignment and >5 min duration)
+   */
+  static async getNoFocusTasks(userId: string, limit: number = 50, dateFilter?: 'today' | 'week' | 'month'): Promise<any> {
+    try {
+      let query = supabase
+        .from('processed_tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('no_focus', true)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      // Apply date filter if specified
+      if (dateFilter) {
+        const now = new Date();
+        let startTime: Date;
+
+        switch (dateFilter) {
+          case 'today':
+            startTime = new Date(now);
+            startTime.setHours(0, 0, 0, 0);
+            break;
+          case 'week':
+            startTime = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            break;
+          case 'month':
+            startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            break;
+          default:
+            startTime = new Date(now);
+            startTime.setHours(0, 0, 0, 0);
+        }
+
+        query = query.gte('created_at', startTime.toISOString());
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch no-focus tasks: ${error.message}`);
+      }
+
+      // Calculate total time spent on no-focus activities
+      const totalNoFocusMinutes = (data || []).reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
+
+      return {
+        success: true,
+        no_focus_tasks: data || [],
+        count: data?.length || 0,
+        total_no_focus_minutes: totalNoFocusMinutes,
+        total_no_focus_hours: Math.round(totalNoFocusMinutes / 60 * 100) / 100,
+        filter_applied: dateFilter || 'none'
+      };
+
+    } catch (error: any) {
+      console.error('Get no-focus tasks error:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch no-focus tasks',
+        no_focus_tasks: []
+      };
+    }
+  }
 
   /**
    * Get current task status for a user
