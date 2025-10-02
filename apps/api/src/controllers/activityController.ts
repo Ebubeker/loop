@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ActivityService } from '../services/activityService';
 import { TaskProcessingWorker } from '../services/taskProcessingWorker';
+import { ActivityBufferService } from '../services/activityBufferService';
 import { supabase } from '../services/database';
 
 export class ActivityController {
@@ -29,48 +30,24 @@ export class ActivityController {
         });
       }
 
-      const activityData = {
-        user_id: userId,
+      const activity = {
+        userId,
+        app,
+        title,
         timestamp: timestamp || new Date().toISOString(),
-        app: app,
-        title: title,
-        event_timestamp: timestamp || new Date().toISOString(),
-        event_duration: duration?.toString() || '0',
-        bucket_id: null,
-        bucket_created: null,
-        bucket_last_updated: null,
-        afk_status: afkStatus || 'not-afk',
-        idle_time: idleTime || 0,
-
-        // Enhanced window information
-        window_bounds: windowDetails?.bounds ? JSON.stringify(windowDetails.bounds) : null,
-        is_visible: windowDetails?.isVisible ?? true,
-        is_minimized: windowDetails?.isMinimized ?? false,
-        is_maximized: windowDetails?.isMaximized ?? false,
-        process_id: windowDetails?.processId || null,
-
-        // Enhanced process information
-        top_processes: processInfo?.topProcesses ? JSON.stringify(processInfo.topProcesses) : null,
-        total_processes: processInfo?.totalProcesses || 0,
-        system_load: processInfo?.systemLoad || 0,
-        process_categories: processInfo?.categories ? JSON.stringify(processInfo.categories) : null
+        duration: duration?.toString() || '0',
+        afkStatus: afkStatus || 'not-afk',
+        idleTime: idleTime || 0,
+        windowDetails,
+        processInfo
       };
 
-      const { data, error } = await supabase
-        .from('activity_logs')
-        .insert(activityData)
-        .select()
-        .single();
+      // Add activity to buffer (will auto-classify when buffer reaches 20)
+      const result = await ActivityBufferService.addActivity(activity);
 
-      if (error) {
-        console.error('Error adding activity:', error);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to add activity to database'
-        });
-      }
-
-      console.log(`✅ Enhanced activity added for user ${userId}: ${app} - ${title}`, {
+      console.log(`✅ Activity buffered for user ${userId}: ${app} - ${title}`, {
+        bufferSize: result.bufferSize,
+        classified: result.classified,
         processes: processInfo?.totalProcesses || 0,
         systemLoad: processInfo?.systemLoad || 0,
         windowState: windowDetails?.isMaximized ? 'maximized' :
@@ -79,8 +56,11 @@ export class ActivityController {
 
       res.json({
         success: true,
-        message: 'Enhanced activity added successfully',
-        activity: data
+        message: result.message,
+        buffered: result.buffered,
+        classified: result.classified,
+        bufferSize: result.bufferSize,
+        maxBufferSize: 20
       });
 
     } catch (error: any) {
@@ -446,6 +426,276 @@ export class ActivityController {
 
     } catch (error: any) {
       console.error('Check inactive tasks error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+  }
+
+  // Subtask Management
+  static async getSubtasks(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const todayOnly = req.query.todayOnly !== 'false'; // default true
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      const { SubtaskService } = await import('../services/subtaskService');
+      const subtasks = await SubtaskService.getSubtasks(userId, todayOnly);
+      
+      res.json({
+        success: true,
+        userId,
+        subtasks,
+        count: subtasks.length,
+        todayOnly
+      });
+      
+    } catch (error: any) {
+      console.error('Get subtasks error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  static async forceSubtaskClassification(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      console.log(`🧩 Force subtask classification for user: ${userId}`);
+      
+      const { SubtaskService } = await import('../services/subtaskService');
+      const result = await SubtaskService.classifyIntoSubtasks(userId);
+      
+      res.json(result);
+      
+    } catch (error: any) {
+      console.error('Force subtask classification error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+  }
+
+  // Major Task Management
+  static async getMajorTasks(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const todayOnly = req.query.todayOnly !== 'false'; // default true
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      const { MajorTaskService } = await import('../services/majorTaskService');
+      const majorTasks = await MajorTaskService.getMajorTasksForUser(userId, todayOnly);
+      
+      res.json({
+        success: true,
+        userId,
+        majorTasks,
+        count: majorTasks.length,
+        todayOnly
+      });
+      
+    } catch (error: any) {
+      console.error('Get major tasks error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  static async forceMajorTaskClassification(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      console.log(`🏗️ Force major task classification for user: ${userId}`);
+      
+      const { MajorTaskService } = await import('../services/majorTaskService');
+      const result = await MajorTaskService.classifyIntoMajorTasks(userId, 'new_subtask');
+      
+      res.json(result);
+      
+    } catch (error: any) {
+      console.error('Force major task classification error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+  }
+
+  // Chat/LLM Endpoints
+  static async askQuestion(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const { question, limit, similarityThreshold, includeHistory } = req.body;
+      
+      if (!userId || !question) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId and question are required'
+        });
+      }
+
+      console.log(`💬 Chat question from user ${userId}: "${question}"`);
+      
+      const { ChatService } = await import('../services/chatService');
+      const result = await ChatService.askQuestion(question, userId, {
+        limit,
+        similarityThreshold,
+        includeHistory
+      });
+      
+      res.json(result);
+      
+    } catch (error: any) {
+      console.error('Ask question error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error',
+        message: error.message
+      });
+    }
+  }
+
+  static async getChatHistory(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 20;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      const { ChatService } = await import('../services/chatService');
+      const history = await ChatService.getChatHistory(userId, limit);
+      
+      res.json({
+        success: true,
+        history,
+        count: history.length
+      });
+      
+    } catch (error: any) {
+      console.error('Get chat history error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  static async clearChatHistory(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      const { ChatService } = await import('../services/chatService');
+      const success = await ChatService.clearChatHistory(userId);
+      
+      res.json({
+        success,
+        message: success ? 'Chat history cleared' : 'Failed to clear chat history'
+      });
+      
+    } catch (error: any) {
+      console.error('Clear chat history error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  static async getSuggestedQuestions(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      const { ChatService } = await import('../services/chatService');
+      const suggestions = await ChatService.getSuggestedQuestions(userId);
+      
+      res.json({
+        success: true,
+        suggestions
+      });
+      
+    } catch (error: any) {
+      console.error('Get suggested questions error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  static async generateEmbeddings(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'User ID is required'
+        });
+      }
+
+      console.log(`🔄 Generating embeddings for user: ${userId}`);
+      
+      const { EmbeddingService } = await import('../services/embeddingService');
+      const result = await EmbeddingService.generateAllEmbeddings(userId);
+      
+      res.json(result);
+      
+    } catch (error: any) {
+      console.error('Generate embeddings error:', error);
       res.status(500).json({
         success: false,
         error: 'Internal server error',
