@@ -84,6 +84,9 @@ export class ActivityBufferService {
       return false;
     }
 
+    // Capture timestamp BEFORE AI processing to ensure consistent timing
+    const classificationTimestamp = new Date().toISOString();
+
     try {
       // Prepare activities in the format expected by the system prompt
       const logs = {
@@ -306,7 +309,7 @@ Schema:
           status: 'completed',
           duration_minutes: durationMinutes,
           activity_summaries: cluster.apps || [],
-          created_at: new Date().toISOString()
+          created_at: classificationTimestamp // Use timestamp from BEFORE AI processing
         };
 
         // Add metadata field if your database supports it (optional)
@@ -360,7 +363,7 @@ Schema:
 
       // Clear buffer after successful classification
       buffer.activities = [];
-      buffer.lastClassified = new Date().toISOString();
+      buffer.lastClassified = classificationTimestamp;
 
       console.log(`🎉 Successfully classified and saved ${clusters.length} cluster(s) for user ${userId}`);
       
