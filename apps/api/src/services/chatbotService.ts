@@ -62,7 +62,7 @@ Remember: You're helping developers improve their workflow, so be supportive and
 
     let context = 'Relevant activity data:\n\n';
 
-    searchResults.forEach((result, index) => {
+    searchResults.forEach((result: any, index: number) => {
       context += `[${index + 1}] ${result.source_type.toUpperCase()}:\n`;
       context += `${result.content}\n`;
       
@@ -94,7 +94,7 @@ Remember: You're helping developers improve their workflow, so be supportive and
 
       // Convert to chat messages and reverse to get chronological order
       const messages: ChatMessage[] = [];
-      data.reverse().forEach(chat => {
+      data.reverse().forEach((chat: any) => {
         messages.push(
           { role: 'user', content: chat.message },
           { role: 'model', content: chat.response }

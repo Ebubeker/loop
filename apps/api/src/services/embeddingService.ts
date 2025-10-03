@@ -193,7 +193,7 @@ class EmbeddingService {
       }
 
       const bySourceType: Record<string, number> = {};
-      data.forEach(item => {
+      data.forEach((item: any) => {
         bySourceType[item.source_type] = (bySourceType[item.source_type] || 0) + 1;
       });
 

@@ -565,124 +565,124 @@ export class ActivityController {
   }
 
   // Chat/LLM Endpoints
-  static async askQuestion(req: Request, res: Response) {
-    try {
-      const { userId } = req.params;
-      const { question, limit, similarityThreshold, includeHistory } = req.body;
+  // static async askQuestion(req: Request, res: Response) {
+  //   try {
+  //     const { userId } = req.params;
+  //     const { question, limit, similarityThreshold, includeHistory } = req.body;
       
-      if (!userId || !question) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId and question are required'
-        });
-      }
+  //     if (!userId || !question) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'userId and question are required'
+  //       });
+  //     }
 
-      console.log(`💬 Chat question from user ${userId}: "${question}"`);
+  //     console.log(`💬 Chat question from user ${userId}: "${question}"`);
       
-      const { ChatService } = await import('../services/chatService');
-      const result = await ChatService.askQuestion(question, userId, {
-        limit,
-        similarityThreshold,
-        includeHistory
-      });
+  //     const { ChatService } = await import('../services/chatService');
+  //     const result = await ChatService.askQuestion(question, userId, {
+  //       limit,
+  //       similarityThreshold,
+  //       includeHistory
+  //     });
       
-      res.json(result);
+  //     res.json(result);
       
-    } catch (error: any) {
-      console.error('Ask question error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error',
-        message: error.message
-      });
-    }
-  }
+  //   } catch (error: any) {
+  //     console.error('Ask question error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       error: 'Internal server error',
+  //       message: error.message
+  //     });
+  //   }
+  // }
 
-  static async getChatHistory(req: Request, res: Response) {
-    try {
-      const { userId } = req.params;
-      const limit = parseInt(req.query.limit as string) || 20;
+  // static async getChatHistory(req: Request, res: Response) {
+  //   try {
+  //     const { userId } = req.params;
+  //     const limit = parseInt(req.query.limit as string) || 20;
       
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'User ID is required'
-        });
-      }
+  //     if (!userId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'User ID is required'
+  //       });
+  //     }
 
-      const { ChatService } = await import('../services/chatService');
-      const history = await ChatService.getChatHistory(userId, limit);
+  //     const { ChatService } = await import('../services/chatService');
+  //     const history = await ChatService.getChatHistory(userId, limit);
       
-      res.json({
-        success: true,
-        history,
-        count: history.length
-      });
+  //     res.json({
+  //       success: true,
+  //       history,
+  //       count: history.length
+  //     });
       
-    } catch (error: any) {
-      console.error('Get chat history error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
-  }
+  //   } catch (error: any) {
+  //     console.error('Get chat history error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       error: 'Internal server error'
+  //     });
+  //   }
+  // }
 
-  static async clearChatHistory(req: Request, res: Response) {
-    try {
-      const { userId } = req.params;
+  // static async clearChatHistory(req: Request, res: Response) {
+  //   try {
+  //     const { userId } = req.params;
       
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'User ID is required'
-        });
-      }
+  //     if (!userId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'User ID is required'
+  //       });
+  //     }
 
-      const { ChatService } = await import('../services/chatService');
-      const success = await ChatService.clearChatHistory(userId);
+  //     const { ChatService } = await import('../services/chatService');
+  //     const success = await ChatService.clearChatHistory(userId);
       
-      res.json({
-        success,
-        message: success ? 'Chat history cleared' : 'Failed to clear chat history'
-      });
+  //     res.json({
+  //       success,
+  //       message: success ? 'Chat history cleared' : 'Failed to clear chat history'
+  //     });
       
-    } catch (error: any) {
-      console.error('Clear chat history error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
-  }
+  //   } catch (error: any) {
+  //     console.error('Clear chat history error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       error: 'Internal server error'
+  //     });
+  //   }
+  // }
 
-  static async getSuggestedQuestions(req: Request, res: Response) {
-    try {
-      const { userId } = req.params;
+  // static async getSuggestedQuestions(req: Request, res: Response) {
+  //   try {
+  //     const { userId } = req.params;
       
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'User ID is required'
-        });
-      }
+  //     if (!userId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'User ID is required'
+  //       });
+  //     }
 
-      const { ChatService } = await import('../services/chatService');
-      const suggestions = await ChatService.getSuggestedQuestions(userId);
+  //     const { ChatService } = await import('../services/chatService');
+  //     const suggestions = await ChatService.getSuggestedQuestions(userId);
       
-      res.json({
-        success: true,
-        suggestions
-      });
+  //     res.json({
+  //       success: true,
+  //       suggestions
+  //     });
       
-    } catch (error: any) {
-      console.error('Get suggested questions error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Internal server error'
-      });
-    }
-  }
+  //   } catch (error: any) {
+  //     console.error('Get suggested questions error:', error);
+  //     res.status(500).json({
+  //       success: false,
+  //       error: 'Internal server error'
+  //     });
+  //   }
+  // }
 
   static async generateEmbeddings(req: Request, res: Response) {
     try {

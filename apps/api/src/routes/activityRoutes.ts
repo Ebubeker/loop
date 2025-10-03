@@ -33,10 +33,10 @@ router.get('/major-tasks/:userId', ActivityController.getMajorTasks);
 router.post('/major-tasks/classify/:userId', ActivityController.forceMajorTaskClassification);
 
 // Chat/LLM endpoints (RAG-based Q&A)
-router.post('/chat/ask/:userId', ActivityController.askQuestion);
-router.get('/chat/history/:userId', ActivityController.getChatHistory);
-router.delete('/chat/history/:userId', ActivityController.clearChatHistory);
-router.get('/chat/suggestions/:userId', ActivityController.getSuggestedQuestions);
+// router.post('/chat/ask/:userId', ActivityController.askQuestion);
+// router.get('/chat/history/:userId', ActivityController.getChatHistory);
+// router.delete('/chat/history/:userId', ActivityController.clearChatHistory);
+// router.get('/chat/suggestions/:userId', ActivityController.getSuggestedQuestions);
 router.post('/chat/embeddings/generate/:userId', ActivityController.generateEmbeddings);
 
 export default router; 
