@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "start:worker": "node dist/workers/timelineWorker.js",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "generate:embeddings": "npx ts-node src/utils/generateEmbeddings.ts"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

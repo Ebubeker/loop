@@ -182,10 +182,16 @@ export class MajorTaskService {
           } else {
             console.log(`✅ Updated major task: "${majorTaskData.title}" (${majorTaskData.subtask_ids.length} subtasks)`);
             updated++;
+            
+            // Auto-generate updated embedding for this major task (non-blocking)
+            if (existingMajorTask.id) {
+              const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+              EmbeddingAutoGenerator.generateForMajorTask(existingMajorTask.id, userId);
+            }
           }
         } else {
           // Create new major task
-          const { error } = await supabase
+          const { data, error } = await supabase
             .from('major_tasks')
             .insert({
               user_id: userId,
@@ -194,13 +200,21 @@ export class MajorTaskService {
               subtask_ids: majorTaskData.subtask_ids,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
-            });
+            })
+            .select()
+            .single();
 
           if (error) {
             console.error(`❌ Failed to create major task:`, error);
           } else {
             console.log(`✅ Created major task: "${majorTaskData.title}" (${majorTaskData.subtask_ids.length} subtasks)`);
             created++;
+            
+            // Auto-generate embedding for this major task (non-blocking)
+            if (data?.id) {
+              const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+              EmbeddingAutoGenerator.generateForMajorTask(data.id, userId);
+            }
           }
         }
       }

@@ -213,6 +213,10 @@ export class SubtaskService {
             updated++;
             updatedSubtaskIds.push(existingSubtask.id);
             
+            // Auto-generate updated embedding for this subtask (non-blocking)
+            const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+            EmbeddingAutoGenerator.generateForSubtask(existingSubtask.id, userId);
+            
             // Check if this subtask reached threshold for major task classification
             if (newUpdateCount >= 10) {
               console.log(`🎯 Subtask ${existingSubtask.id} reached 10 updates - will trigger major task classification`);
@@ -241,6 +245,10 @@ export class SubtaskService {
             created++;
             if (data?.id) {
               createdSubtaskIds.push(data.id);
+              
+              // Auto-generate embedding for this subtask (non-blocking)
+              const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+              EmbeddingAutoGenerator.generateForSubtask(data.id, userId);
             }
           }
         }

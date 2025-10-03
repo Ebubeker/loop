@@ -507,12 +507,14 @@ export class ActivityService {
     }
 
     // Save to database with log summary
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('processed_tasks')
       .insert({
         ...taskObject,
         log_pretty_desc: logPrettyDesc
-      });
+      })
+      .select()
+      .single();
 
       if (error) {
       console.error(`❌ Failed to save task for user ${userId}:`, error);
@@ -520,6 +522,12 @@ export class ActivityService {
     }
 
     console.log(`💾 Finalized task for user ${userId}: "${task.task_title}" (${task.duration_minutes} min, ${status})${task.task_id ? ` [linked to task: ${task.task_id}]` : ' [standalone task]'}${isNoFocus ? ' 🚨 [NO FOCUS - >5min unassigned]' : ''}`);
+    
+    // Auto-generate embedding for this processed task (non-blocking)
+    if (data?.id) {
+      const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+      EmbeddingAutoGenerator.generateForProcessedTask(data.id, userId);
+    }
     
     // Check for inactive tasks and auto-complete them after creating new processed log
     await this.checkAndCompleteInactiveTasks(userId);

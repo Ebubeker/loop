@@ -339,6 +339,10 @@ Schema:
           console.log(`✅ Cluster saved for user ${userId}: "${cluster.label}" (${durationMinutes} min, ${cluster.productivity} productivity, ${cluster.confidence} confidence)`);
           if (data?.id) {
             savedTaskIds.push(data.id);
+            
+            // Auto-generate embedding for this processed task (non-blocking)
+            const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
+            EmbeddingAutoGenerator.generateForProcessedTask(data.id, userId);
           }
         }
       }

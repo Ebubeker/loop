@@ -164,7 +164,7 @@ export class ActivityController {
     try {
       const { userId, taskId, taskName, taskDescription, taskStatus, taskTimestamp, linkedTaskId } = req.body;
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('processed_tasks')
         .insert({
           // user_id: task.user_id,
@@ -185,7 +185,9 @@ export class ActivityController {
           activity_summaries: [],
           task_id: linkedTaskId || null, // Link to existing task if provided
           created_at: new Date().toISOString()
-        });
+        })
+        .select()
+        .single();
 
       if (error) {
         console.error(`❌ Failed to save task for user ${userId}:`, error);
@@ -197,6 +199,12 @@ export class ActivityController {
         : 'Processed task added successfully (standalone)';
 
       console.log(`✅ ${logMessage} for user ${userId}: "${taskName}"`);
+
+      // Auto-generate embedding for this processed task (non-blocking)
+      if (data?.id) {
+        const { EmbeddingAutoGenerator } = await import('../services/embeddingAutoGenerator');
+        EmbeddingAutoGenerator.generateForProcessedTask(data.id, userId);
+      }
 
       res.json({
         success: true,
@@ -689,10 +697,14 @@ export class ActivityController {
 
       console.log(`🔄 Generating embeddings for user: ${userId}`);
       
-      const { EmbeddingService } = await import('../services/embeddingService');
-      const result = await EmbeddingService.generateAllEmbeddings(userId);
+      const { generateAllEmbeddings } = await import('../utils/generateEmbeddings');
+      const result = await generateAllEmbeddings(userId);
       
-      res.json(result);
+      res.json({
+        success: true,
+        message: 'Embeddings generated successfully',
+        data: result
+      });
       
     } catch (error: any) {
       console.error('Generate embeddings error:', error);
