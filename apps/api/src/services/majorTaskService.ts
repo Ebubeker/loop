@@ -338,10 +338,47 @@ Return ONLY valid JSON with ALL major_tasks (existing updated + any new ones).`;
   }
 
   /**
-   * Get major tasks for a user
+   * Get major tasks for a user with optional date range filtering
+   * @param userId - User ID
+   * @param todayOnly - If true, only return today's major tasks (ignored if fromDate is provided)
+   * @param fromDate - Optional start date (ISO string)
+   * @param toDate - Optional end date (ISO string). If not provided, filters to current time
    */
-  static async getMajorTasksForUser(userId: string, todayOnly: boolean = true): Promise<MajorTask[]> {
-    return this.getMajorTasks(userId, todayOnly);
+  static async getMajorTasksForUser(
+    userId: string, 
+    todayOnly: boolean = true,
+    fromDate?: string,
+    toDate?: string
+  ): Promise<MajorTask[]> {
+    let query = supabase
+      .from('major_tasks')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    // Date range filtering takes priority over todayOnly
+    if (fromDate) {
+      query = query.gte('created_at', fromDate);
+      
+      // If toDate is provided, filter up to that date, otherwise filter to now
+      if (toDate) {
+        query = query.lte('created_at', toDate);
+      }
+    } else if (todayOnly) {
+      // Fall back to todayOnly if no date range provided
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      query = query.gte('created_at', today.toISOString());
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching major tasks:', error);
+      return [];
+    }
+
+    return data || [];
   }
 
   /**

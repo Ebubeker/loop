@@ -765,18 +765,20 @@ export class ActivityService {
   }
 
   /**
-   * Get processed tasks for a user
+   * Get processed tasks for a user with optional date range filtering
+   * @param userId - User ID
+   * @param limit - Maximum number of tasks to return
+   * @param fromDate - Optional start date (ISO string). Defaults to today's start
+   * @param toDate - Optional end date (ISO string). If not provided, filters to current time
    */
-  static async getProcessedTasks(userId: string, limit: number = 50): Promise<any> {
+  static async getProcessedTasks(
+    userId: string, 
+    limit: number = 50,
+    fromDate?: string,
+    toDate?: string
+  ): Promise<any> {
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0); // start of today
-  
-      const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1); // start of tomorrow
-  
-      // Get processed tasks with linked task information
-      const { data, error } = await supabase
+      let query = supabase
         .from('processed_tasks')
         .select(`
           *,
@@ -789,10 +791,28 @@ export class ActivityService {
           )
         `)
         .eq('user_id', userId)
-        .gte('created_at', today.toISOString())   // created today or later
-        .lt('created_at', tomorrow.toISOString()) // but before tomorrow
         .order('created_at', { ascending: true })
         .limit(limit);
+  
+      // Apply date range filtering
+      if (fromDate) {
+        query = query.gte('created_at', fromDate);
+        
+        // If toDate is provided, filter up to that date, otherwise filter to now
+        if (toDate) {
+          query = query.lte('created_at', toDate);
+        }
+      } else {
+        // Default to today if no date range provided
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(today.getDate() + 1);
+        
+        query = query.gte('created_at', today.toISOString()).lt('created_at', tomorrow.toISOString());
+      }
+
+      const { data, error } = await query;
   
       if (error) {
         throw new Error(`Failed to fetch processed tasks: ${error.message}`);

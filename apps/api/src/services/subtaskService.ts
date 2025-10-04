@@ -365,16 +365,34 @@ Return ONLY valid JSON with ALL subtasks (existing + any new ones).`;
   }
 
   /**
-   * Get subtasks for a user (today or all time)
+   * Get subtasks for a user with optional date range filtering
+   * @param userId - User ID
+   * @param todayOnly - If true, only return today's subtasks (ignored if fromDate is provided)
+   * @param fromDate - Optional start date (ISO string)
+   * @param toDate - Optional end date (ISO string). If not provided, filters to current time
    */
-  static async getSubtasks(userId: string, todayOnly: boolean = true): Promise<Subtask[]> {
+  static async getSubtasks(
+    userId: string, 
+    todayOnly: boolean = true,
+    fromDate?: string,
+    toDate?: string
+  ): Promise<Subtask[]> {
     let query = supabase
       .from('subtasks')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    if (todayOnly) {
+    // Date range filtering takes priority over todayOnly
+    if (fromDate) {
+      query = query.gte('created_at', fromDate);
+      
+      // If toDate is provided, filter up to that date, otherwise filter to now
+      if (toDate) {
+        query = query.lte('created_at', toDate);
+      }
+    } else if (todayOnly) {
+      // Fall back to todayOnly if no date range provided
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       query = query.gte('created_at', today.toISOString());

@@ -101,8 +101,6 @@ export class ActivityBufferService {
         }))
       };
 
-      console.log(`🤖 Classifying ${buffer.activities.length} activities for user ${userId}...`);
-
       // Call Gemini for classification using the custom system prompt
       const systemPrompt = `
 You are a real-time activity classifier. Every input you receive is a 1-minute batch of up to 20 atomic in-screen activities captured while a user works. Your job is to:
@@ -309,7 +307,7 @@ Schema:
           status: 'completed',
           duration_minutes: durationMinutes,
           activity_summaries: cluster.apps || [],
-          created_at: classificationTimestamp // Use timestamp from BEFORE AI processing
+          created_at: buffer?.activities[19].timestamp // Use timestamp from BEFORE AI processing
         };
 
         // Add metadata field if your database supports it (optional)

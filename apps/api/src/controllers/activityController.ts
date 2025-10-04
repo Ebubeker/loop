@@ -184,7 +184,7 @@ export class ActivityController {
           duration_minutes: 0,
           activity_summaries: [],
           task_id: linkedTaskId || null, // Link to existing task if provided
-          created_at: new Date().toISOString()
+          created_at: taskTimestamp
         })
         .select()
         .single();
@@ -224,6 +224,8 @@ export class ActivityController {
     try {
       const { userId } = req.params;
       const limit = parseInt(req.query.limit as string) || 50;
+      const fromDate = req.query.fromDate as string;
+      const toDate = req.query.toDate as string;
 
       if (!userId) {
         return res.status(400).json({
@@ -232,16 +234,20 @@ export class ActivityController {
         });
       }
 
-      console.log(`📋 Getting processed tasks for user: ${userId} (limit: ${limit})`);
+      console.log(`📋 Getting processed tasks for user: ${userId} (limit: ${limit}, fromDate: ${fromDate || 'today'}, toDate: ${toDate || 'now'})`);
 
-      const tasks = await ActivityService.getProcessedTasks(userId, limit);
+      const result = await ActivityService.getProcessedTasks(userId, limit, fromDate, toDate);
 
       res.json({
-        success: true,
+        success: result.success,
         userId,
-        tasks,
-        count: tasks.length,
-        limit
+        tasks: result.tasks,
+        count: result.count,
+        linked_count: result.linked_count,
+        standalone_count: result.standalone_count,
+        limit,
+        fromDate: fromDate || 'today',
+        toDate: toDate || 'now'
       });
 
     } catch (error: any) {
@@ -447,6 +453,8 @@ export class ActivityController {
     try {
       const { userId } = req.params;
       const todayOnly = req.query.todayOnly !== 'false'; // default true
+      const fromDate = req.query.fromDate as string;
+      const toDate = req.query.toDate as string;
       
       if (!userId) {
         return res.status(400).json({
@@ -455,15 +463,19 @@ export class ActivityController {
         });
       }
 
+      console.log(`🧩 Getting subtasks for user: ${userId} (todayOnly: ${todayOnly}, fromDate: ${fromDate || 'none'}, toDate: ${toDate || 'none'})`);
+
       const { SubtaskService } = await import('../services/subtaskService');
-      const subtasks = await SubtaskService.getSubtasks(userId, todayOnly);
+      const subtasks = await SubtaskService.getSubtasks(userId, todayOnly, fromDate, toDate);
       
       res.json({
         success: true,
         userId,
         subtasks,
         count: subtasks.length,
-        todayOnly
+        todayOnly,
+        fromDate: fromDate || (todayOnly ? 'today' : 'all'),
+        toDate: toDate || 'now'
       });
       
     } catch (error: any) {
@@ -508,6 +520,8 @@ export class ActivityController {
     try {
       const { userId } = req.params;
       const todayOnly = req.query.todayOnly !== 'false'; // default true
+      const fromDate = req.query.fromDate as string;
+      const toDate = req.query.toDate as string;
       
       if (!userId) {
         return res.status(400).json({
@@ -516,15 +530,19 @@ export class ActivityController {
         });
       }
 
+      console.log(`🏗️ Getting major tasks for user: ${userId} (todayOnly: ${todayOnly}, fromDate: ${fromDate || 'none'}, toDate: ${toDate || 'none'})`);
+
       const { MajorTaskService } = await import('../services/majorTaskService');
-      const majorTasks = await MajorTaskService.getMajorTasksForUser(userId, todayOnly);
+      const majorTasks = await MajorTaskService.getMajorTasksForUser(userId, todayOnly, fromDate, toDate);
       
       res.json({
         success: true,
         userId,
         majorTasks,
         count: majorTasks.length,
-        todayOnly
+        todayOnly,
+        fromDate: fromDate || (todayOnly ? 'today' : 'all'),
+        toDate: toDate || 'now'
       });
       
     } catch (error: any) {
