@@ -48,7 +48,8 @@ router.post('/', async (req: Request, res: Response) => {
         user_id,
         duration: duration || null,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        status: 'pending'
       })
       .select()
       .single();

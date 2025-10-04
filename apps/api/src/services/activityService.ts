@@ -791,7 +791,7 @@ export class ActivityService {
           )
         `)
         .eq('user_id', userId)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(limit);
   
       // Apply date range filtering

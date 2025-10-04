@@ -193,7 +193,7 @@ export class SubtaskService {
         if (existingSubtask) {
           // Increment update_count
           const newUpdateCount = (existingSubtask.update_count || 0) + 1;
-          
+
           // Update existing subtask
           const { error } = await supabase
             .from('subtasks')
@@ -212,11 +212,11 @@ export class SubtaskService {
             console.log(`✅ Updated subtask: "${subtaskData.name}" (${subtaskData.task_ids.length} tasks, ${newUpdateCount} updates)`);
             updated++;
             updatedSubtaskIds.push(existingSubtask.id);
-            
+
             // Auto-generate updated embedding for this subtask (non-blocking)
             const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
             EmbeddingAutoGenerator.generateForSubtask(existingSubtask.id, userId);
-            
+
             // Check if this subtask reached threshold for major task classification
             if (newUpdateCount >= 10) {
               console.log(`🎯 Subtask ${existingSubtask.id} reached 10 updates - will trigger major task classification`);
@@ -245,7 +245,7 @@ export class SubtaskService {
             created++;
             if (data?.id) {
               createdSubtaskIds.push(data.id);
-              
+
               // Auto-generate embedding for this subtask (non-blocking)
               const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
               EmbeddingAutoGenerator.generateForSubtask(data.id, userId);
@@ -253,13 +253,13 @@ export class SubtaskService {
           }
         }
       }
-      
+
       // Trigger major task classification if needed
       const shouldTriggerMajorTask = created > 0 || updatedSubtaskIds.some(async (id) => {
         const shouldTrigger = await MajorTaskService.shouldTriggerClassification(userId, id, false);
         return shouldTrigger;
       });
-      
+
       if (created > 0) {
         console.log(`🏗️ New subtasks created - triggering major task classification...`);
         await MajorTaskService.classifyIntoMajorTasks(userId, 'new_subtask');
@@ -295,22 +295,78 @@ export class SubtaskService {
 
 
   private static buildClassificationPrompt(
-    tasks: any[], 
-    existingSubtasks: any[], 
+    tasks: any[],
+    existingSubtasks: any[],
     newTaskId?: number
   ): string {
-    const isInitial = existingSubtasks.length === 0;
-    
-    if (isInitial) {
+      //       return `
+      // You are a task grouping assistant. You will receive a list of personalized tasks completed by a user today.
+      // Your job is to group these tasks into logical **subtasks** based on their intent, topic, and context.
+
+      // Rules:
+      // 1. A subtask represents a higher-level work stream or project that groups related personalized tasks
+      // 2. Group tasks that share similar intent, domain, or are part of the same project
+      // 3. Each subtask should have a clear, descriptive name (8-15 words)
+      // 4. Each subtask should have a summary explaining what work was done (15-30 words)
+      // 5. A subtask must contain at least 1 task
+      // 6. If tasks are completely unrelated, create separate subtasks
+      // 7. Use descriptive names like "Backend API development for user authentication" instead of generic names like "Coding"
+
+      // Tasks to classify:
+      // ${JSON.stringify(tasks, null, 2)}
+
+      // Output format (JSON only, no markdown):
+      // {
+      //   "subtasks": [
+      //     {
+      //       "name": "descriptive subtask name",
+      //       "summary": "what work was accomplished in this subtask",
+      //       "task_ids": [1, 2, 3]
+      //     }
+      //   ]
+      // }
+
+      // Return ONLY valid JSON.`;
+      //     } else {
+      //       return `
+      // You are a task grouping assistant. A new personalized task has been completed.
+      // Your job is to classify this task into one of the existing subtasks OR create a new subtask if it doesn't fit.
+
+      // Existing subtasks:
+      // ${JSON.stringify(existingSubtasks, null, 2)}
+
+      // All tasks (including new one - ID: ${newTaskId}):
+      // ${JSON.stringify(tasks, null, 2)}
+
+      // Rules:
+      // 1. Try to classify the new task into an existing subtask if it matches the intent/topic
+      // 2. If the new task doesn't fit any existing subtask, create a new one
+      // 3. Update the subtask summary to reflect all tasks in that group
+      // 4. Maintain consistency with existing subtask names
+      // 5. Each subtask name should be descriptive (8-15 words)
+
+      // Output format (JSON only, no markdown):
+      // {
+      //   "subtasks": [
+      //     {
+      //       "id": 123,  // include ID if updating existing subtask, omit if creating new
+      //       "name": "subtask name",
+      //       "summary": "updated summary including all tasks",
+      //       "task_ids": [1, 2, 3, ${newTaskId}]
+      //     }
+      //   ]
+      // }
+
+      // Return ONLY valid JSON with ALL subtasks (existing + any new ones).`;
       return `
 You are a task grouping assistant. You will receive a list of personalized tasks completed by a user today.
-Your job is to group these tasks into logical **subtasks** based on their intent, topic, and context.
+Your job is to group these tasks into logical subtasks based on their intent, topic, and context.
 
 Rules:
 1. A subtask represents a higher-level work stream or project that groups related personalized tasks
 2. Group tasks that share similar intent, domain, or are part of the same project
-3. Each subtask should have a clear, descriptive name (8-15 words)
-4. Each subtask should have a summary explaining what work was done (15-30 words)
+3. Each subtask should have a clear, descriptive name 8 to 15 words
+4. Each subtask should have a summary explaining what work was done 15 to 30 words
 5. A subtask must contain at least 1 task
 6. If tasks are completely unrelated, create separate subtasks
 7. Use descriptive names like "Backend API development for user authentication" instead of generic names like "Coding"
@@ -318,41 +374,78 @@ Rules:
 Tasks to classify:
 ${JSON.stringify(tasks, null, 2)}
 
-Output format (JSON only, no markdown):
+Output format JSON only, no markdown:
 {
   "subtasks": [
     {
       "name": "descriptive subtask name",
+      "short_desc": "short summary",
       "summary": "what work was accomplished in this subtask",
       "task_ids": [1, 2, 3]
     }
   ]
 }
 
-Return ONLY valid JSON.`;
-    } else {
-      return `
+Examples of good subtasks JSON only:
+
+{
+  "subtasks": [
+    {
+      "name": "Backend API development for user authentication and session management",
+      "short_desc": "Implemented and refined auth routes with secure session handling",
+      "summary": "Built and debugged login and refresh endpoints, added JWT rotation, validated input, and wrote minimal tests to confirm session lifecycle across protected routes.",
+      "task_ids": [101, 108, 112]
+    }
+  ]
+}
+
+{
+  "subtasks": [
+    {
+      "name": "Marketing website redesign for landing pages navigation accessibility and performance",
+      "short_desc": "Redesigned key pages and improved accessibility and load times",
+      "summary": "Updated hero and pricing layouts, simplified navigation, added ARIA roles, compressed images, and optimized fonts to reduce Largest Contentful Paint and cumulative layout shift.",
+      "task_ids": [205, 209, 214, 217]
+    }
+  ]
+}
+
+{
+  "subtasks": [
+    {
+      "name": "Data pipeline maintenance for analytics ingestion cleaning and schema validation",
+      "short_desc": "Stabilized event ingestion and enforced schema checks",
+      "summary": "Investigated dropped events, added dead letter queue handling, normalized payload fields, and introduced schema versioning with validation to prevent malformed records from reaching the warehouse.",
+      "task_ids": [301, 302]
+    }
+  ]
+}
+
+Return ONLY valid JSON.
+
+---
+
 You are a task grouping assistant. A new personalized task has been completed.
-Your job is to classify this task into one of the existing subtasks OR create a new subtask if it doesn't fit.
+Your job is to classify this task into one of the existing subtasks OR create a new subtask if it does not fit.
 
 Existing subtasks:
 ${JSON.stringify(existingSubtasks, null, 2)}
 
-All tasks (including new one - ID: ${newTaskId}):
+All tasks including new one - ID: ${newTaskId}:
 ${JSON.stringify(tasks, null, 2)}
 
 Rules:
-1. Try to classify the new task into an existing subtask if it matches the intent/topic
-2. If the new task doesn't fit any existing subtask, create a new one
+1. Try to classify the new task into an existing subtask if it matches the intent or topic
+2. If the new task does not fit any existing subtask, create a new one
 3. Update the subtask summary to reflect all tasks in that group
 4. Maintain consistency with existing subtask names
-5. Each subtask name should be descriptive (8-15 words)
+5. Each subtask name should be descriptive 8 to 15 words
 
-Output format (JSON only, no markdown):
+Output format JSON only, no markdown:
 {
   "subtasks": [
     {
-      "id": 123,  // include ID if updating existing subtask, omit if creating new
+      "id": 123,
       "name": "subtask name",
       "summary": "updated summary including all tasks",
       "task_ids": [1, 2, 3, ${newTaskId}]
@@ -360,8 +453,8 @@ Output format (JSON only, no markdown):
   ]
 }
 
-Return ONLY valid JSON with ALL subtasks (existing + any new ones).`;
-    }
+Return ONLY valid JSON with ALL subtasks existing plus any new ones.
+`;
   }
 
   /**
@@ -372,7 +465,7 @@ Return ONLY valid JSON with ALL subtasks (existing + any new ones).`;
    * @param toDate - Optional end date (ISO string). If not provided, filters to current time
    */
   static async getSubtasks(
-    userId: string, 
+    userId: string,
     todayOnly: boolean = true,
     fromDate?: string,
     toDate?: string
@@ -386,7 +479,7 @@ Return ONLY valid JSON with ALL subtasks (existing + any new ones).`;
     // Date range filtering takes priority over todayOnly
     if (fromDate) {
       query = query.gte('created_at', fromDate);
-      
+
       // If toDate is provided, filter up to that date, otherwise filter to now
       if (toDate) {
         query = query.lte('created_at', toDate);
