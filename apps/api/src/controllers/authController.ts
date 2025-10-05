@@ -2,6 +2,42 @@ import { Request, Response } from 'express';
 import { AuthService } from '../services/authService';
 
 export class AuthController {
+  /**
+   * GET /api/auth/users
+   * Get all users with optional organization filtering
+   */
+  static async getAllUsers(req: Request, res: Response) {
+    try {
+      // Get org_ids from query parameters
+      // Supports: ?org_ids=id1,id2,id3 or ?org_ids[]=id1&org_ids[]=id2
+      const { org_ids } = req.query;
+
+      console.log(org_ids);
+
+      const result = await AuthService.getAllUsers(org_ids as string);
+      
+      res.json(result);
+
+    } catch (error: any) {
+      console.error('Get all users error:', error);
+      res.status(500).json({ 
+        success: false,
+        error: 'Internal server error' 
+      });
+    }
+  }
+
+  static async getUser(req: Request, res: Response) {
+    try {
+      const { userId } = req.params;
+      const result = await AuthService.getUserProfile(userId);
+      res.json(result);
+    } catch (error: any) {
+      console.error('Get user error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
   static async createAccount(req: Request, res: Response) {
     try {
       const { id, email, name, role, org_id } = req.body;

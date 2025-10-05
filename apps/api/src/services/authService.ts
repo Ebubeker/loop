@@ -171,4 +171,61 @@ export class AuthService {
       }
     };
   }
+
+  static async getUserProfile(userId: string) {
+    const { data, error } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      throw new Error('Failed to get user profile');
+    }
+
+    return {
+      success: true,
+      user: data
+    };
+  }
+
+  /**
+   * Get all user profiles with optional organization filtering
+   * @param orgIds - Optional array of organization IDs to filter by
+   * @returns Array of user profiles
+   */
+  static async getAllUsers(orgIds: string | undefined) {
+    try {
+      let query = supabase
+        .from('user_profiles')
+        .select('id, name, role, org_id, created_at, updated_at')
+        .order('created_at', { ascending: false });
+
+      // Apply organization filter if provided
+
+      console.log('👥 Getting all users' + (orgIds ? ` filtered by organizations: ${orgIds}` : ''));
+
+      if (orgIds && orgIds.length > 0) {
+        query = query.eq('org_id', orgIds);
+      }
+
+      const { data: users, error } = await query;
+
+      if (error) {
+        console.error('Error fetching users:', error);
+        throw new Error('Failed to fetch users');
+      }
+
+      return {
+        success: true,
+        message: 'Users fetched successfully',
+        users: users || [],
+        count: users?.length || 0
+      };
+
+    } catch (error: any) {
+      console.error('Get all users error:', error);
+      throw error;
+    }
+  }
 } 

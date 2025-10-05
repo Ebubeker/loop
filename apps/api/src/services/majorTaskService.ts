@@ -239,6 +239,10 @@ export class MajorTaskService {
         }
       }
 
+      // Check and update defined task completion based on time spent
+      console.log('🔍 Checking defined task completion status...');
+      await this.checkAndUpdateTaskCompletion(userId, subtasks);
+
       return {
         success: true,
         message: `Classified ${subtasks.length} subtasks into ${majorTasks.length} major tasks`,
@@ -472,5 +476,96 @@ Return ONLY valid JSON with ALL major_tasks (existing updated + any new ones).
       .from('subtasks')
       .update({ update_count: 0 })
       .eq('id', subtaskId);
+  }
+
+  /**
+   * Check and update defined task completion status based on time spent
+   * Calculates total time from processed_tasks linked to the defined task
+   */
+  private static async checkAndUpdateTaskCompletion(
+    userId: string,
+    subtasks: Subtask[]
+  ): Promise<void> {
+    try {
+      // Get all personalized_task_ids from all subtasks
+      const allPersonalizedTaskIds = subtasks.flatMap(sub => sub.personalized_task_ids);
+      
+      if (allPersonalizedTaskIds.length === 0) {
+        console.log('⏭️ No personalized tasks to check for completion');
+        return;
+      }
+
+      // Fetch all processed_tasks (processlogs) for these IDs
+      const { data: processedTasks, error: processedError } = await supabase
+        .from('processed_tasks')
+        .select('id, task_id, duration_minutes')
+        .in('id', allPersonalizedTaskIds)
+        .not('task_id', 'is', null); // Only get tasks linked to defined tasks
+
+      if (processedError) {
+        console.error('❌ Error fetching processed tasks:', processedError);
+        return;
+      }
+
+      if (!processedTasks || processedTasks.length === 0) {
+        console.log('⏭️ No processed tasks linked to defined tasks');
+        return;
+      }
+
+      // Group by task_id and calculate total time spent
+      const taskTimeMap = new Map<number, number>();
+      
+      processedTasks.forEach(pt => {
+        if (pt.task_id) {
+          const currentTime = taskTimeMap.get(pt.task_id) || 0;
+          taskTimeMap.set(pt.task_id, currentTime + (pt.duration_minutes || 0));
+        }
+      });
+
+      console.log(`⏱️ Checking completion for ${taskTimeMap.size} defined tasks...`);
+
+      // For each defined task, check if time spent >= duration
+      for (const [taskId, totalMinutesSpent] of taskTimeMap.entries()) {
+        const { data: task, error: taskError } = await supabase
+          .from('tasks')
+          .select('id, name, duration, status')
+          .eq('id', taskId)
+          .eq('user_id', userId)
+          .single();
+
+        if (taskError || !task) {
+          console.error(`❌ Error fetching task ${taskId}:`, taskError);
+          continue;
+        }
+
+        // Skip if task is already completed
+        if (task.status === 'completed') {
+          console.log(`✓ Task "${task.name}" already marked as completed`);
+          continue;
+        }
+
+        // Check if time spent exceeds or equals the defined duration
+        if (task.duration && totalMinutesSpent >= task.duration) {
+          const { error: updateError } = await supabase
+            .from('tasks')
+            .update({
+              status: 'completed',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', taskId);
+
+          if (updateError) {
+            console.error(`❌ Failed to mark task ${taskId} as completed:`, updateError);
+          } else {
+            console.log(`✅ Task "${task.name}" marked as COMPLETED! (${totalMinutesSpent}/${task.duration} minutes)`);
+          }
+        } else {
+          console.log(`⏳ Task "${task.name}" in progress: ${totalMinutesSpent}/${task.duration} minutes`);
+        }
+      }
+
+    } catch (error: any) {
+      console.error('❌ Error checking task completion:', error);
+    }
   }
 } 
