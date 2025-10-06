@@ -142,7 +142,9 @@ Title quality:
   - Literature review with PDF notes
 
 Summaries and scores:
-* Cluster summary length: 8 to 20 words.
+* Cluster summary length: 15 to 40 words for detailed descriptions.
+* Use bullet points when describing multiple related activities or steps.
+* Include specific details about what was accomplished, tools used, and outcomes.
 * Include top 3 keywords from content, titles, and text snippets.
 * Provide productivity per cluster: "low", "medium", or "high" based on intent and active actions
   (typing, coding, debugging, focused editing tend higher; idle or passive watching tend lower).
@@ -198,7 +200,7 @@ Example 1 - Email drafting with reference lookup
       "cluster_id": 1,
       "label": "Release email drafting to client",
       "alternative_labels": ["email", "writing"],
-      "summary": "Composed release email, inserted policy excerpt, attached notes, and finalized the message.",
+      "summary": "Drafted comprehensive release notification email including: • Composed main message with feature highlights • Inserted policy compliance excerpt from internal docs • Attached deployment notes and changelog • Reviewed and finalized message before sending",
       "apps": ["Gmail"],
       "top_actions": ["typed", "pasted", "attached"],
       "keywords": ["release", "policy", "notes"],
@@ -211,7 +213,7 @@ Example 1 - Email drafting with reference lookup
     }
   ],
   "primary_cluster_id": 1,
-  "session_summary": "Wrote and finalized client release email with referenced policy notes and attachments.",
+  "session_summary": "Composed and finalized comprehensive client release email with policy compliance references, deployment notes, and changelog attachments.",
   "overall_productivity": "high",
   "notes": null
 }
@@ -226,7 +228,7 @@ Example 2 - UI design with brief Slack check
       "cluster_id": 1,
       "label": "Dashboard layout edits in Figma",
       "alternative_labels": ["design", "Figma editing"],
-      "summary": "Refined dashboard layout, resized components, briefly checked Slack for feedback, and exported assets.",
+      "summary": "Comprehensive dashboard redesign session including: • Refined main layout structure and component positioning • Resized and aligned UI elements for better spacing • Checked Slack for team feedback on current design • Exported high-resolution assets for development handoff",
       "apps": ["Figma", "Slack"],
       "top_actions": ["dragged", "resized", "exported"],
       "keywords": ["dashboard", "layout", "assets"],
@@ -239,7 +241,7 @@ Example 2 - UI design with brief Slack check
     }
   ],
   "primary_cluster_id": 1,
-  "session_summary": "Focused Figma editing on dashboard layout with a quick Slack check for feedback.",
+  "session_summary": "Conducted focused Figma dashboard redesign with layout refinements, component adjustments, team feedback check, and asset export for development.",
   "overall_productivity": "high",
   "notes": "Slack check merged into design work"
 }
@@ -254,7 +256,7 @@ Example 3 - Literature review with PDF and notes
       "cluster_id": 1,
       "label": "Literature review with PDF notes",
       "alternative_labels": ["research", "reading"],
-      "summary": "Reviewed paper sections, highlighted key passages, and captured structured notes in Obsidian.",
+      "summary": "Comprehensive academic paper analysis including: • Reviewed methodology and results sections in detail • Highlighted key findings and statistical data • Cross-referenced claims with cited sources in browser • Captured structured research notes with citations in Obsidian",
       "apps": ["Chrome", "Adobe Acrobat", "Obsidian"],
       "top_actions": ["scrolled", "highlighted", "typed"],
       "keywords": ["paper", "notes", "highlights"],
@@ -267,7 +269,7 @@ Example 3 - Literature review with PDF and notes
     }
   ],
   "primary_cluster_id": 1,
-  "session_summary": "Read and annotated an academic PDF while recording structured notes for later synthesis.",
+  "session_summary": "Conducted thorough academic paper review with detailed highlighting, source verification, and structured note-taking for research synthesis.",
   "overall_productivity": "medium",
   "notes": null
 }
@@ -282,7 +284,7 @@ Example 4 - Tutorial viewing with notes
       "cluster_id": 1,
       "label": "Node deployment tutorial with notes",
       "alternative_labels": ["video learning", "note-taking"],
-      "summary": "Watched tutorial segments, paused to capture deployment steps and environment configuration details.",
+      "summary": "Active tutorial learning session including: • Watched Node.js deployment tutorial segments with focused attention • Paused video multiple times to capture key commands and configurations • Documented environment setup steps and deployment procedures • Organized notes in Notion with clear action items for implementation",
       "apps": ["YouTube", "Notion"],
       "top_actions": ["played", "paused", "typed"],
       "keywords": ["deployment", "environment", "steps"],
@@ -295,7 +297,7 @@ Example 4 - Tutorial viewing with notes
     }
   ],
   "primary_cluster_id": 1,
-  "session_summary": "Followed a deployment tutorial and captured actionable setup notes for later execution.",
+  "session_summary": "Engaged in structured tutorial learning with active note-taking, command documentation, and organized setup procedures for Node.js deployment.",
   "overall_productivity": "medium",
   "notes": null
 }
@@ -310,7 +312,7 @@ Example 5 - Noise heavy with frequent switching
       "cluster_id": 1,
       "label": "Transient switching with background media",
       "alternative_labels": ["mixed activity", "task switching"],
-      "summary": "Frequent app switches, brief browsing, music playback, and notification checks without a clear focus.",
+      "summary": "Unfocused activity period with multiple distractions including: • Frequent application switching between browser, music player, and messaging apps • Brief news browsing and social media checks • Background music playback on Spotify • Multiple notification responses and quick message replies without sustained focus on any single task",
       "apps": ["Spotify", "Chrome", "various"],
       "top_actions": ["switched", "scrolled", "played"],
       "keywords": ["switching", "browsing", "music"],
@@ -323,7 +325,7 @@ Example 5 - Noise heavy with frequent switching
     }
   ],
   "primary_cluster_id": 1,
-  "session_summary": "Unfocused minute characterized by rapid application switching and passive media playback.",
+  "session_summary": "Unfocused session with rapid application switching, brief browsing, background music, and frequent notification responses without sustained attention.",
   "overall_productivity": "low",
   "notes": "All activities consolidated into one low focus cluster"
 }
@@ -531,11 +533,8 @@ Example 5 - Noise heavy with frequent switching
       // Create a consolidated title from primary cluster and session summary
       const consolidatedTitle = primaryCluster.label || parsed.session_summary || 'Work session';
 
-      // Create a detailed description combining session summary and cluster info
-      let consolidatedDescription = parsed.session_summary || primaryCluster.summary || '';
-      if (clusters.length > 1) {
-        consolidatedDescription += `\n\nActivities included: ${clusters.map((c: any) => c.label).join('; ')}`;
-      }
+      // Create a detailed markdown description combining session summary and cluster info
+      let consolidatedDescription = this.formatMarkdownDescription(parsed, clusters, primaryCluster);
 
       // Collect all apps from all clusters
       const allApps = [...new Set(clusters.flatMap((c: any) => c.apps || []))];
@@ -682,5 +681,97 @@ Example 5 - Noise heavy with frequent switching
    */
   static getAllBuffers(): Map<string, UserBuffer> {
     return this.buffers;
+  }
+
+  /**
+   * Format description as markdown with structured information
+   */
+  private static formatMarkdownDescription(parsed: any, clusters: any[], primaryCluster: any): string {
+    let markdown = '';
+
+    // Main session summary
+    if (parsed.session_summary) {
+      markdown += `## Session Summary\n\n${parsed.session_summary}\n\n`;
+    }
+
+    // Overall productivity indicator
+    if (parsed.overall_productivity) {
+      const productivityLevel = parsed.overall_productivity.toLowerCase();
+      const productivityEmoji = productivityLevel === 'high' ? '🟢' : 
+                                productivityLevel === 'medium' ? '🟡' : 
+                                productivityLevel === 'low' ? '🔴' : '⚪';
+      
+      markdown += `**Overall Productivity:** ${productivityEmoji} ${parsed.overall_productivity.toUpperCase()}\n\n`;
+    }
+
+    // Primary activity details
+    if (primaryCluster) {
+      markdown += `## Primary Activity\n\n`;
+      markdown += `**${primaryCluster.label}**\n\n`;
+      
+      if (primaryCluster.summary) {
+        markdown += `${primaryCluster.summary}\n\n`;
+      }
+
+      // Apps used
+      if (primaryCluster.apps && primaryCluster.apps.length > 0) {
+        markdown += `**Applications:** ${primaryCluster.apps.join(', ')}\n\n`;
+      }
+
+      // Keywords
+      if (primaryCluster.keywords && primaryCluster.keywords.length > 0) {
+        markdown += `**Keywords:** ${primaryCluster.keywords.map((k: string) => `\`${k}\``).join(', ')}\n\n`;
+      }
+
+      // Productivity level
+      if (primaryCluster.productivity) {
+        const productivityLevel = primaryCluster.productivity.toLowerCase();
+        const productivityEmoji = productivityLevel === 'high' ? '🟢' : 
+                                  productivityLevel === 'medium' ? '🟡' : 
+                                  productivityLevel === 'low' ? '🔴' : '⚪';
+        
+        markdown += `**Productivity Level:** ${productivityEmoji} ${primaryCluster.productivity.toUpperCase()}\n\n`;
+      }
+
+      // Confidence score
+      if (primaryCluster.confidence) {
+        const confidencePercent = Math.round(primaryCluster.confidence * 100);
+        markdown += `**Confidence:** ${confidencePercent}%\n\n`;
+      }
+
+      // Suggested next action
+      if (primaryCluster.suggested_next_action) {
+        markdown += `**Suggested Next Action:** ${primaryCluster.suggested_next_action}\n\n`;
+      }
+    }
+
+    // Additional clusters if multiple
+    if (clusters.length > 1) {
+      markdown += `## Additional Activities\n\n`;
+      clusters.forEach((cluster, index) => {
+        if (cluster.cluster_id !== parsed.primary_cluster_id) {
+          markdown += `### ${cluster.label}\n\n`;
+          if (cluster.summary) {
+            markdown += `${cluster.summary}\n\n`;
+          }
+          if (cluster.apps && cluster.apps.length > 0) {
+            markdown += `**Apps:** ${cluster.apps.join(', ')}\n\n`;
+          }
+        }
+      });
+    }
+
+    // Session metadata
+    markdown += `## Session Details\n\n`;
+    markdown += `- **Duration:** ${parsed.activities_count || 0} activities\n`;
+    markdown += `- **Time Range:** ${parsed.timestamp_start} → ${parsed.timestamp_end}\n`;
+    markdown += `- **Clusters Generated:** ${clusters.length}\n`;
+
+    // Notes if any
+    if (parsed.notes) {
+      markdown += `\n**Notes:** ${parsed.notes}\n`;
+    }
+
+    return markdown.trim();
   }
 } 
