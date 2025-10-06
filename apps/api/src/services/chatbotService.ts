@@ -65,7 +65,10 @@ Formatting:
 ---
 
 If data is missing or unclear:
-- Acknowledge it gracefully: “There isn’t enough recent data to determine that.”
+- Acknowledge it gracefully but still try to be helpful
+- Suggest related questions you might be able to answer
+- Offer to help with what you do know
+- Be encouraging rather than dismissive
 
 ---
 
@@ -153,11 +156,234 @@ If data is missing or unclear:
   }
 
   /**
+   * Perform enhanced search with multiple strategies
+   */
+  private async performEnhancedSearch(
+    message: string,
+    userId: string,
+    options?: {
+      includeHistory?: boolean;
+      contextLimit?: number;
+      contextThreshold?: number;
+    }
+  ): Promise<any[]> {
+    try {
+      // Strategy 1: Try with lower threshold first (more permissive)
+      let searchResults = await this.embeddingService.searchSimilar(
+        message,
+        userId,
+        {
+          limit: options?.contextLimit || 15,
+          threshold: options?.contextThreshold || 0.4, // Lower threshold for more results
+        }
+      );
+
+      // Strategy 2: If we don't have enough results, try with even lower threshold
+      if (searchResults.length < 3) {
+        const fallbackResults = await this.embeddingService.searchSimilar(
+          message,
+          userId,
+          {
+            limit: options?.contextLimit || 20,
+            threshold: 0.2, // Very low threshold
+          }
+        );
+        
+        // Merge results, avoiding duplicates
+        const existingIds = new Set(searchResults.map(r => r.id));
+        const newResults = fallbackResults.filter(r => !existingIds.has(r.id));
+        searchResults = [...searchResults, ...newResults];
+      }
+
+      // Strategy 3: Try alternative query formulations
+      if (searchResults.length < 2) {
+        const alternativeQueries = this.generateAlternativeQueries(message);
+        
+        for (const altQuery of alternativeQueries) {
+          const altResults = await this.embeddingService.searchSimilar(
+            altQuery,
+            userId,
+            {
+              limit: 10,
+              threshold: 0.3,
+            }
+          );
+          
+          // Merge unique results
+          const existingIds = new Set(searchResults.map(r => r.id));
+          const newResults = altResults.filter(r => !existingIds.has(r.id));
+          searchResults = [...searchResults, ...newResults];
+          
+          if (searchResults.length >= 5) break; // Stop if we have enough
+        }
+      }
+
+      // Strategy 4: Get recent activity as fallback
+      if (searchResults.length === 0) {
+        searchResults = await this.getRecentActivityFallback(userId);
+      }
+
+      return searchResults.slice(0, options?.contextLimit || 15);
+    } catch (error) {
+      console.error('Error in enhanced search:', error);
+      // Return empty array as fallback
+      return [];
+    }
+  }
+
+  /**
+   * Generate alternative query formulations
+   */
+  private generateAlternativeQueries(originalQuery: string): string[] {
+    const alternatives: string[] = [];
+    const lowerQuery = originalQuery.toLowerCase();
+
+    // Time-based alternatives
+    if (lowerQuery.includes('today') || lowerQuery.includes('working on')) {
+      alternatives.push('recent activities today');
+      alternatives.push('current tasks today');
+      alternatives.push('what was done today');
+    }
+
+    // Task-based alternatives
+    if (lowerQuery.includes('task') || lowerQuery.includes('work')) {
+      alternatives.push('completed tasks');
+      alternatives.push('recent work activities');
+      alternatives.push('task progress');
+    }
+
+    // Productivity alternatives
+    if (lowerQuery.includes('productivity') || lowerQuery.includes('efficiency')) {
+      alternatives.push('work patterns');
+      alternatives.push('time spent on activities');
+      alternatives.push('activity summary');
+    }
+
+    // Project alternatives
+    if (lowerQuery.includes('project') || lowerQuery.includes('major')) {
+      alternatives.push('major tasks');
+      alternatives.push('project progress');
+      alternatives.push('main initiatives');
+    }
+
+    return alternatives.slice(0, 3); // Limit to 3 alternatives
+  }
+
+  /**
+   * Get recent activity as fallback when embeddings don't work
+   */
+  private async getRecentActivityFallback(userId: string): Promise<any[]> {
+    try {
+      // Get recent processed tasks, subtasks, and major tasks directly from database
+      const [processedTasks, subtasks, majorTasks] = await Promise.all([
+        this.supabase
+          .from('processed_tasks')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5),
+        this.supabase
+          .from('subtasks')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5),
+        this.supabase
+          .from('major_tasks')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(5),
+      ]);
+
+      const fallbackResults: any[] = [];
+
+      // Convert to search result format
+      if (processedTasks.data) {
+        processedTasks.data.forEach((task: any) => {
+          fallbackResults.push({
+            id: `processed_${task.id}`,
+            source_type: 'processed_task',
+            source_id: task.id,
+            content: `Task: ${task.title || 'Untitled task'}\nSummary: ${task.summary || 'No summary available'}\nDuration: ${task.duration_seconds || 0} seconds`,
+            metadata: task,
+            similarity: 0.5, // Default similarity for fallback
+          });
+        });
+      }
+
+      if (subtasks.data) {
+        subtasks.data.forEach((subtask: any) => {
+          fallbackResults.push({
+            id: `subtask_${subtask.id}`,
+            source_type: 'subtask',
+            source_id: subtask.id,
+            content: `Subtask: ${subtask.title || 'Untitled subtask'}\nDescription: ${subtask.description || 'No description available'}`,
+            metadata: subtask,
+            similarity: 0.5,
+          });
+        });
+      }
+
+      if (majorTasks.data) {
+        majorTasks.data.forEach((task: any) => {
+          fallbackResults.push({
+            id: `major_${task.id}`,
+            source_type: 'major_task',
+            source_id: task.id,
+            content: `Major Task: ${task.title || 'Untitled major task'}\nDescription: ${task.description || 'No description available'}`,
+            metadata: task,
+            similarity: 0.5,
+          });
+        });
+      }
+
+      return fallbackResults;
+    } catch (error) {
+      console.error('Error getting recent activity fallback:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Build enhanced prompt with better context handling
+   */
+  private buildEnhancedPrompt(message: string, context: string, searchResults: any[]): string {
+    const hasData = searchResults.length > 0;
+    const dataQuality = searchResults.length >= 3 ? 'good' : searchResults.length >= 1 ? 'limited' : 'none';
+
+    let prompt = `Context from user's activity data:
+${context}
+
+User question: ${message}
+
+`;
+
+    if (hasData) {
+      prompt += `You have ${dataQuality} data available. Please provide a helpful, insightful response based on the context above. `;
+      
+      if (dataQuality === 'limited') {
+        prompt += `While the data is limited, do your best to provide useful insights from what's available. `;
+      }
+      
+      prompt += `Focus on being helpful and providing actionable insights. If you need to make reasonable inferences from the available data, that's acceptable.`;
+    } else {
+      prompt += `No specific activity data was found for this query. However, you should still try to be helpful by:`;
+      prompt += `\n1. Acknowledging that you don't have specific data for this query`;
+      prompt += `\n2. Suggesting what kind of data would be helpful`;
+      prompt += `\n3. Offering to help with related questions that you might be able to answer`;
+      prompt += `\n4. Being encouraging and supportive rather than just saying "I don't have data"`;
+    }
+
+    return prompt;
+  }
+
+  /**
    * Format context from embeddings search results
    */
   private formatContext(searchResults: any[]): string {
     if (searchResults.length === 0) {
-      return 'No relevant activity data found.';
+      return 'No specific activity data found for this query.';
     }
 
     let context = 'Relevant activity data:\n\n';
@@ -167,13 +393,38 @@ If data is missing or unclear:
       context += `${result.content}\n`;
 
       if (result.metadata && Object.keys(result.metadata).length > 0) {
-        context += `Additional info: ${JSON.stringify(result.metadata, null, 2)}\n`;
+        // Only include relevant metadata fields
+        const relevantMeta = this.extractRelevantMetadata(result.metadata);
+        if (Object.keys(relevantMeta).length > 0) {
+          context += `Additional info: ${JSON.stringify(relevantMeta, null, 2)}\n`;
+        }
       }
 
       context += `Relevance: ${(result.similarity * 100).toFixed(1)}%\n\n`;
     });
 
     return context;
+  }
+
+  /**
+   * Extract only relevant metadata fields
+   */
+  private extractRelevantMetadata(metadata: any): any {
+    const relevant: any = {};
+    
+    // Common relevant fields
+    const relevantFields = [
+      'title', 'description', 'summary', 'duration_seconds', 'created_at', 
+      'updated_at', 'status', 'priority', 'tags', 'category'
+    ];
+    
+    relevantFields.forEach(field => {
+      if (metadata[field] !== undefined && metadata[field] !== null) {
+        relevant[field] = metadata[field];
+      }
+    });
+    
+    return relevant;
   }
 
   /**
@@ -245,17 +496,10 @@ If data is missing or unclear:
     }
   ): Promise<ChatResponse> {
     try {
-      // Step 1: Search for relevant context using embeddings
-      const searchResults = await this.embeddingService.searchSimilar(
-        message,
-        userId,
-        {
-          limit: options?.contextLimit || 10,
-          threshold: options?.contextThreshold || 0.6,
-        }
-      );
+      // Step 1: Enhanced query processing - try multiple search strategies
+      const searchResults = await this.performEnhancedSearch(message, userId, options);
 
-      // Step 2: Format the context
+      // Step 2: Format the context with better fallback handling
       const context = this.formatContext(searchResults);
 
       // Step 3: Get chat history if requested
@@ -280,13 +524,8 @@ If data is missing or unclear:
         history: chatHistory,
       });
 
-      // Create the prompt with context
-      const prompt = `Context from user's activity data:
-${context}
-
-User question: ${message}
-
-Please provide a helpful, concise response based on the context above. If the context doesn't contain relevant information, let the user know what kind of data you'd need to answer their question.`;
+      // Create the enhanced prompt with context
+      const prompt = this.buildEnhancedPrompt(message, context, searchResults);
 
       // Step 5: Generate response
       const result = await chat.sendMessage(prompt);
@@ -323,7 +562,8 @@ Please provide a helpful, concise response based on the context above. If the co
 
       const response = await this.chat(query, userId, {
         includeHistory: false,
-        contextLimit: 20,
+        contextLimit: 25,
+        contextThreshold: 0.3, // Lower threshold for summaries
       });
 
       return response.response;
@@ -343,7 +583,7 @@ Please provide a helpful, concise response based on the context above. If the co
       const response = await this.chat(query, userId, {
         includeHistory: false,
         contextLimit: 30,
-        contextThreshold: 0.5,
+        contextThreshold: 0.3, // Lower threshold for insights
       });
 
       return response.response;

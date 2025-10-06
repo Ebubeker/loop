@@ -24,7 +24,15 @@ export class ChatbotController {
       const supabase = createClient(supabaseUrl, supabaseKey);
       const chatbot = new ChatbotService(geminiApiKey, supabase);
 
-      const response = await chatbot.chat(message, userId, options);
+      // Use smarter default options if not provided
+      const smartOptions = {
+        includeHistory: true,
+        contextLimit: 15,
+        contextThreshold: 0.4, // Lower threshold for better results
+        ...options
+      };
+
+      const response = await chatbot.chat(message, userId, smartOptions);
 
       res.json({
         success: true,
