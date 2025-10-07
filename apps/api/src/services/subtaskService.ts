@@ -366,10 +366,11 @@ Rules:
 1. A subtask represents a higher-level work stream or project that groups related personalized tasks
 2. Group tasks that share similar intent, domain, or are part of the same project
 3. Each subtask should have a clear, descriptive name 8 to 15 words
-4. Each subtask should have a summary explaining what work was done 15 to 30 words
-5. A subtask must contain at least 1 task
-6. If tasks are completely unrelated, create separate subtasks
-7. Use descriptive names like "Backend API development for user authentication" instead of generic names like "Coding"
+4. Each subtask should have a summary with bullet points and a conclusion (40-60 words total)
+5. Summary format: "Work description including: • Bullet point 1 • Bullet point 2 • Bullet point 3. Brief conclusion sentence."
+6. A subtask must contain at least 1 task
+7. If tasks are completely unrelated, create separate subtasks
+8. Use descriptive names like "Backend API development for user authentication" instead of generic names like "Coding"
 
 Tasks to classify:
 ${JSON.stringify(tasks, null, 2)}
@@ -379,8 +380,7 @@ Output format JSON only, no markdown:
   "subtasks": [
     {
       "name": "descriptive subtask name",
-      "short_desc": "short summary",
-      "summary": "what work was accomplished in this subtask",
+      "summary": "what work was accomplished in this subtask with bullet points",
       "task_ids": [1, 2, 3]
     }
   ]
@@ -392,8 +392,7 @@ Examples of good subtasks JSON only:
   "subtasks": [
     {
       "name": "Backend API development for user authentication and session management",
-      "short_desc": "Implemented and refined auth routes with secure session handling",
-      "summary": "Built and debugged login and refresh endpoints, added JWT rotation, validated input, and wrote minimal tests to confirm session lifecycle across protected routes.",
+      "summary": "Authentication system development including: • Built and debugged login and refresh endpoints • Added JWT token rotation for enhanced security • Implemented input validation and error handling • Wrote tests to confirm session lifecycle across protected routes. Successfully established secure authentication flow with proper token management.",
       "task_ids": [101, 108, 112]
     }
   ]
@@ -403,8 +402,7 @@ Examples of good subtasks JSON only:
   "subtasks": [
     {
       "name": "Marketing website redesign for landing pages navigation accessibility and performance",
-      "short_desc": "Redesigned key pages and improved accessibility and load times",
-      "summary": "Updated hero and pricing layouts, simplified navigation, added ARIA roles, compressed images, and optimized fonts to reduce Largest Contentful Paint and cumulative layout shift.",
+      "summary": "Website redesign and optimization including: • Updated hero and pricing page layouts for better user experience • Simplified navigation structure and improved accessibility • Added ARIA roles and semantic HTML elements • Compressed images and optimized fonts for faster loading • Reduced Largest Contentful Paint and cumulative layout shift. Successfully improved website performance and accessibility standards.",
       "task_ids": [205, 209, 214, 217]
     }
   ]
@@ -414,8 +412,7 @@ Examples of good subtasks JSON only:
   "subtasks": [
     {
       "name": "Data pipeline maintenance for analytics ingestion cleaning and schema validation",
-      "short_desc": "Stabilized event ingestion and enforced schema checks",
-      "summary": "Investigated dropped events, added dead letter queue handling, normalized payload fields, and introduced schema versioning with validation to prevent malformed records from reaching the warehouse.",
+      "summary": "Data pipeline stabilization including: • Investigated and resolved dropped events in the ingestion process • Added dead letter queue handling for failed records • Normalized payload fields for consistent data structure • Introduced schema versioning with validation rules • Prevented malformed records from reaching the data warehouse. Successfully stabilized the data pipeline with improved error handling and data quality.",
       "task_ids": [301, 302]
     }
   ]
@@ -437,9 +434,10 @@ ${JSON.stringify(tasks, null, 2)}
 Rules:
 1. Try to classify the new task into an existing subtask if it matches the intent or topic
 2. If the new task does not fit any existing subtask, create a new one
-3. Update the subtask summary to reflect all tasks in that group
-4. Maintain consistency with existing subtask names
-5. Each subtask name should be descriptive 8 to 15 words
+3. Update the subtask summary to reflect all tasks in that group with bullet points and conclusion
+4. Summary format: "Work description including: • Bullet point 1 • Bullet point 2 • Bullet point 3. Brief conclusion sentence."
+5. Maintain consistency with existing subtask names
+6. Each subtask name should be descriptive 8 to 15 words
 
 Output format JSON only, no markdown:
 {
