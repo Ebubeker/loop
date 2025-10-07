@@ -230,6 +230,8 @@ export class ActivityService {
    * Main processing function - should be called every minute
    */
   static async processUserActivities(userId: string): Promise<void> {
+    const processingStartTime = Date.now();
+    
     try {
       this.initializeUserTaskProcessing(userId);
       
@@ -307,11 +309,26 @@ export class ActivityService {
         }
       }
 
-      // Update last processed time
-      userState.last_processed_time = new Date().toISOString();
+      // Calculate processing time and compensate for delays
+      const processingEndTime = Date.now();
+      const processingDuration = processingEndTime - processingStartTime;
+      const processingDurationSeconds = Math.round(processingDuration / 1000);
+      
+      // If processing took longer than expected, adjust the last_processed_time
+      // to prevent gaps in activity tracking
+      const expectedProcessingTime = 30 * 1000; // 30 seconds expected
+      const compensationTime = Math.max(0, processingDuration - expectedProcessingTime);
+      
+      // Update last processed time with compensation
+      const compensatedTime = new Date(processingEndTime - compensationTime);
+      userState.last_processed_time = compensatedTime.toISOString();
       userState.is_processing = false;
 
-      console.log(`✅ Completed processing for user ${userId}`);
+      if (processingDurationSeconds > 30) {
+        console.log(`⚠️ Processing took ${processingDurationSeconds}s for user ${userId} (compensated by ${Math.round(compensationTime/1000)}s)`);
+      } else {
+        console.log(`✅ Completed processing for user ${userId} in ${processingDurationSeconds}s`);
+      }
 
     } catch (error: any) {
       console.error(`❌ Error processing activities for user ${userId}:`, error);

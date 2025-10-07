@@ -1,5 +1,6 @@
 import { supabase } from './database';
 import { SubtaskService } from './subtaskService';
+import { IdleTrackingService } from './idleTrackingService';
 
 interface Activity {
   userId: string;
@@ -20,7 +21,7 @@ interface UserBuffer {
 
 export class ActivityBufferService {
   private static buffers: Map<string, UserBuffer> = new Map();
-  private static readonly BUFFER_SIZE = 20;
+  private static readonly BUFFER_SIZE = 100;
 
   /**
    * Add activity to user's buffer and classify if buffer is full
@@ -31,8 +32,33 @@ export class ActivityBufferService {
     classified?: boolean;
     bufferSize?: number;
     message?: string;
+    shouldEndTimer?: boolean;
   }> {
     const { userId } = activity;
+
+    // Update idle state tracking
+    const idleState = IdleTrackingService.updateIdleState(userId, {
+      timestamp: activity.timestamp,
+      afkStatus: activity.afkStatus,
+      idleTime: activity.idleTime
+    });
+
+    // Check if timer should be ended due to continuous idle time
+    if (idleState.shouldEndTimer) {
+      console.log(`⏰ Timer should be ended for user ${userId} due to ${Math.floor(idleState.continuousIdleSeconds / 60)} minutes of continuous idle time`);
+      
+      // Save current idle session before ending
+      await IdleTrackingService.saveIdleSession(userId);
+      
+      return {
+        success: true,
+        buffered: false,
+        classified: false,
+        bufferSize: 0,
+        message: `Timer ended due to ${Math.floor(idleState.continuousIdleSeconds / 60)} minutes of continuous idle time`,
+        shouldEndTimer: true
+      };
+    }
 
     // Initialize buffer if doesn't exist
     if (!this.buffers.has(userId)) {
@@ -49,7 +75,7 @@ export class ActivityBufferService {
 
     console.log(`📝 Activity buffered for user ${userId}: ${activity.app} - ${activity.title} (${buffer.activities.length}/${this.BUFFER_SIZE})`);
 
-    // Check if buffer has exactly 20 activities (classify every 20: at 20, 40, 60, etc.)
+    // Check if buffer has exactly 100 activities (classify every 100: at 100, 200, 300, etc.)
     if (buffer.activities.length === this.BUFFER_SIZE) {
       console.log(`🎯 Buffer reached ${this.BUFFER_SIZE} activities for user ${userId}, triggering classification...`);
 
@@ -111,11 +137,11 @@ export class ActivityBufferService {
 
 ---
 
-You are a real-time activity classifier. Every input you receive is a 1-minute batch of up to 20 atomic in-screen activities captured while a user works.
+You are a real-time activity classifier. Every input you receive is a batch of up to 100 atomic in-screen activities captured while a user works.
 
 Your job:
 1) Consolidate the activities into exactly one coherent task cluster.
-2) Produce a concise human-readable summary for that single cluster.
+2) Produce a concise human-readable summary for that single cluster using the Intent, Actions, Outcome format.
 3) Return structured JSON only, following the schema below. Do not return any narrative text outside the JSON.
 
 Hard rules:
@@ -170,7 +196,9 @@ Schema:
       "cluster_id": 1,
       "label": "string",
       "alternative_labels": ["string", "..."],
-      "summary": "string",
+      "intent": "What the user set out to do",
+      "actions": "Concrete steps or logged activities taken toward that goal (format as bullet points separated by •)",
+      "outcome": "What was achieved, completed, or learned",
       "apps": ["app name or browser domain", "..."],
       "top_actions": ["typed", "clicked", "navigated", "..."],
       "keywords": ["keyword1", "keyword2", "keyword3"],
@@ -200,7 +228,9 @@ Example 1 - Email drafting with reference lookup
       "cluster_id": 1,
       "label": "Release email drafting to client",
       "alternative_labels": ["email", "writing"],
-      "summary": "Drafted comprehensive release notification email including: • Composed main message with feature highlights • Inserted policy compliance excerpt from internal docs • Attached deployment notes and changelog • Reviewed and finalized message before sending",
+      "intent": "Draft and send a comprehensive release notification email to client",
+      "actions": "• Composed main message with feature highlights • Inserted policy compliance excerpt from internal docs • Attached deployment notes and changelog • Reviewed and finalized message",
+      "outcome": "Completed comprehensive release email with all required attachments and policy compliance references, ready for sending",
       "apps": ["Gmail"],
       "top_actions": ["typed", "pasted", "attached"],
       "keywords": ["release", "policy", "notes"],
@@ -228,7 +258,9 @@ Example 2 - UI design with brief Slack check
       "cluster_id": 1,
       "label": "Dashboard layout edits in Figma",
       "alternative_labels": ["design", "Figma editing"],
-      "summary": "Comprehensive dashboard redesign session including: • Refined main layout structure and component positioning • Resized and aligned UI elements for better spacing • Checked Slack for team feedback on current design • Exported high-resolution assets for development handoff",
+      "intent": "Redesign dashboard layout and prepare assets for development handoff",
+      "actions": "• Refined main layout structure and component positioning • Resized and aligned UI elements for better spacing • Checked Slack for team feedback on current design • Exported high-resolution assets",
+      "outcome": "Completed dashboard redesign with improved layout structure, better spacing, team feedback integration, and exported assets ready for development",
       "apps": ["Figma", "Slack"],
       "top_actions": ["dragged", "resized", "exported"],
       "keywords": ["dashboard", "layout", "assets"],
@@ -256,7 +288,9 @@ Example 3 - Literature review with PDF and notes
       "cluster_id": 1,
       "label": "Literature review with PDF notes",
       "alternative_labels": ["research", "reading"],
-      "summary": "Comprehensive academic paper analysis including: • Reviewed methodology and results sections in detail • Highlighted key findings and statistical data • Cross-referenced claims with cited sources in browser • Captured structured research notes with citations in Obsidian",
+      "intent": "Conduct comprehensive academic paper analysis and capture structured research notes",
+      "actions": "• Reviewed methodology and results sections in detail • Highlighted key findings and statistical data • Cross-referenced claims with cited sources in browser • Captured structured research notes with citations in Obsidian",
+      "outcome": "Completed thorough paper analysis with highlighted key findings, verified sources, and organized structured notes with proper citations for future reference",
       "apps": ["Chrome", "Adobe Acrobat", "Obsidian"],
       "top_actions": ["scrolled", "highlighted", "typed"],
       "keywords": ["paper", "notes", "highlights"],
@@ -284,7 +318,9 @@ Example 4 - Tutorial viewing with notes
       "cluster_id": 1,
       "label": "Node deployment tutorial with notes",
       "alternative_labels": ["video learning", "note-taking"],
-      "summary": "Active tutorial learning session including: • Watched Node.js deployment tutorial segments with focused attention • Paused video multiple times to capture key commands and configurations • Documented environment setup steps and deployment procedures • Organized notes in Notion with clear action items for implementation",
+      "intent": "Learn Node.js deployment procedures and create actionable implementation notes",
+      "actions": "• Watched Node.js deployment tutorial segments with focused attention • Paused video multiple times to capture key commands and configurations • Documented environment setup steps and deployment procedures • Organized notes in Notion with clear action items",
+      "outcome": "Gained comprehensive understanding of Node.js deployment with documented setup steps, key commands, and organized action items ready for implementation",
       "apps": ["YouTube", "Notion"],
       "top_actions": ["played", "paused", "typed"],
       "keywords": ["deployment", "environment", "steps"],
@@ -312,7 +348,9 @@ Example 5 - Noise heavy with frequent switching
       "cluster_id": 1,
       "label": "Transient switching with background media",
       "alternative_labels": ["mixed activity", "task switching"],
-      "summary": "Unfocused activity period with multiple distractions including: • Frequent application switching between browser, music player, and messaging apps • Brief news browsing and social media checks • Background music playback on Spotify • Multiple notification responses and quick message replies without sustained focus on any single task",
+      "intent": "No clear primary intent - unfocused activity period with multiple distractions",
+      "actions": "• Frequent application switching between browser, music player, and messaging apps • Brief news browsing and social media checks • Background music playback on Spotify • Multiple notification responses and quick message replies",
+      "outcome": "No significant progress on any single task due to lack of sustained focus and frequent context switching",
       "apps": ["Spotify", "Chrome", "various"],
       "top_actions": ["switched", "scrolled", "played"],
       "keywords": ["switching", "browsing", "music"],
@@ -331,7 +369,7 @@ Example 5 - Noise heavy with frequent switching
 }
 `;
       //       const systemPrompt = `
-      // You are a real-time activity classifier. Every input you receive is a 1-minute batch of up to 20 atomic in-screen activities captured while a user works. Your job is to:
+      // You are a real-time activity classifier. Every input you receive is a batch of up to 100 atomic in-screen activities captured while a user works. Your job is to:
 
       // 1. Group those activities into coherent task clusters.
       // 2. Produce a concise human-readable summary for each cluster.
@@ -586,8 +624,11 @@ Example 5 - Noise heavy with frequent switching
 
       console.log(`✅ Processed log saved for user ${userId}: "${consolidatedTitle}" (${durationMinutes} min, ${buffer.activities.length} activities, ${clusters.length} clusters)`);
 
-      // Auto-generate embedding for this processed task (non-blocking)
+      // Save idle session data after processing (link to processed task)
       if (data?.id) {
+        await IdleTrackingService.saveIdleSession(userId, data.id);
+
+        // Auto-generate embedding for this processed task (non-blocking)
         const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
         EmbeddingAutoGenerator.generateForProcessedTask(data.id, userId);
 
@@ -640,6 +681,25 @@ Example 5 - Noise heavy with frequent switching
   }
 
   /**
+   * Get idle state for a user
+   */
+  static getIdleState(userId: string): {
+    isIdle: boolean;
+    continuousIdleSeconds: number;
+    maxContinuousIdleSeconds: number;
+    shouldEndTimer: boolean;
+  } {
+    return IdleTrackingService.getIdleState(userId);
+  }
+
+  /**
+   * Clear idle state for a user
+   */
+  static clearIdleState(userId: string): boolean {
+    return IdleTrackingService.clearUserState(userId);
+  }
+
+  /**
    * Get current buffer status for a user
    */
   static getBufferStatus(userId: string): {
@@ -684,41 +744,48 @@ Example 5 - Noise heavy with frequent switching
   }
 
   /**
-   * Format description as simple markdown with core activities
+   * Format description using Intent, Actions, Outcome structure
    */
   private static formatMarkdownDescription(parsed: any, clusters: any[], primaryCluster: any): string {
     let markdown = '';
 
-    // Simple description from session summary
-    if (parsed.session_summary) {
-      markdown += `${parsed.session_summary}\n\n`;
-    }
-
-    // Core activities as bullet points
-    if (primaryCluster && primaryCluster.summary) {
-      markdown += `**Core Activities:**\n`;
-      
-      // Extract bullet points from the summary if they exist
-      const summary = primaryCluster.summary;
-      if (summary.includes('•')) {
-        // Split by bullet points and clean up
-        const bulletPoints = summary.split('•').slice(1); // Remove first empty element
-        bulletPoints.forEach((point: string) => {
-          const cleanPoint = point.trim();
-          if (cleanPoint) {
-            markdown += `- ${cleanPoint}\n`;
-          }
-        });
-      } else {
-        // If no bullet points, just use the summary as a single point
-        markdown += `- ${summary}\n`;
+    // Intent, Actions, Outcome format
+    if (primaryCluster) {
+      if (primaryCluster.intent) {
+        markdown += `### Intent\n${primaryCluster.intent}\n\n`;
       }
-      markdown += '\n';
-    }
-
-    // Apps used (simple list)
-    if (primaryCluster && primaryCluster.apps && primaryCluster.apps.length > 0) {
-      markdown += `**Applications:** ${primaryCluster.apps.join(', ')}\n\n`;
+      
+      if (primaryCluster.actions) {
+        markdown += `### Actions\n`;
+        // Split actions by bullet points or create bullet points from comma-separated actions
+        const actions = primaryCluster.actions;
+        if (actions.includes('•')) {
+          // Split by bullet points and clean up
+          const bulletPoints = actions.split('•').slice(1); // Remove first empty element
+          bulletPoints.forEach((point: string) => {
+            const cleanPoint = point.trim();
+            if (cleanPoint) {
+              markdown += `- ${cleanPoint}\n`;
+            }
+          });
+        } else if (actions.includes(',')) {
+          // Split by commas and create bullet points
+          const actionList = actions.split(',').map((action: string) => action.trim());
+          actionList.forEach((action: string) => {
+            if (action) {
+              markdown += `- ${action}\n`;
+            }
+          });
+        } else {
+          // Single action as bullet point
+          markdown += `- ${actions}\n`;
+        }
+        markdown += '\n';
+      }
+      
+      if (primaryCluster.outcome) {
+        markdown += `### Outcome\n${primaryCluster.outcome}\n\n`;
+      }
     }
 
     return markdown.trim();
