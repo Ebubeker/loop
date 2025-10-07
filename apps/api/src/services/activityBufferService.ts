@@ -684,92 +684,41 @@ Example 5 - Noise heavy with frequent switching
   }
 
   /**
-   * Format description as markdown with structured information
+   * Format description as simple markdown with core activities
    */
   private static formatMarkdownDescription(parsed: any, clusters: any[], primaryCluster: any): string {
     let markdown = '';
 
-    // Main session summary
+    // Simple description from session summary
     if (parsed.session_summary) {
-      markdown += `## Session Summary\n\n${parsed.session_summary}\n\n`;
+      markdown += `${parsed.session_summary}\n\n`;
     }
 
-    // Overall productivity indicator
-    if (parsed.overall_productivity) {
-      const productivityLevel = parsed.overall_productivity.toLowerCase();
-      const productivityEmoji = productivityLevel === 'high' ? '🟢' : 
-                                productivityLevel === 'medium' ? '🟡' : 
-                                productivityLevel === 'low' ? '🔴' : '⚪';
+    // Core activities as bullet points
+    if (primaryCluster && primaryCluster.summary) {
+      markdown += `**Core Activities:**\n`;
       
-      markdown += `**Overall Productivity:** ${productivityEmoji} ${parsed.overall_productivity.toUpperCase()}\n\n`;
-    }
-
-    // Primary activity details
-    if (primaryCluster) {
-      markdown += `## Primary Activity\n\n`;
-      markdown += `**${primaryCluster.label}**\n\n`;
-      
-      if (primaryCluster.summary) {
-        markdown += `${primaryCluster.summary}\n\n`;
-      }
-
-      // Apps used
-      if (primaryCluster.apps && primaryCluster.apps.length > 0) {
-        markdown += `**Applications:** ${primaryCluster.apps.join(', ')}\n\n`;
-      }
-
-      // Keywords
-      if (primaryCluster.keywords && primaryCluster.keywords.length > 0) {
-        markdown += `**Keywords:** ${primaryCluster.keywords.map((k: string) => `\`${k}\``).join(', ')}\n\n`;
-      }
-
-      // Productivity level
-      if (primaryCluster.productivity) {
-        const productivityLevel = primaryCluster.productivity.toLowerCase();
-        const productivityEmoji = productivityLevel === 'high' ? '🟢' : 
-                                  productivityLevel === 'medium' ? '🟡' : 
-                                  productivityLevel === 'low' ? '🔴' : '⚪';
-        
-        markdown += `**Productivity Level:** ${productivityEmoji} ${primaryCluster.productivity.toUpperCase()}\n\n`;
-      }
-
-      // Confidence score
-      if (primaryCluster.confidence) {
-        const confidencePercent = Math.round(primaryCluster.confidence * 100);
-        markdown += `**Confidence:** ${confidencePercent}%\n\n`;
-      }
-
-      // Suggested next action
-      if (primaryCluster.suggested_next_action) {
-        markdown += `**Suggested Next Action:** ${primaryCluster.suggested_next_action}\n\n`;
-      }
-    }
-
-    // Additional clusters if multiple
-    if (clusters.length > 1) {
-      markdown += `## Additional Activities\n\n`;
-      clusters.forEach((cluster, index) => {
-        if (cluster.cluster_id !== parsed.primary_cluster_id) {
-          markdown += `### ${cluster.label}\n\n`;
-          if (cluster.summary) {
-            markdown += `${cluster.summary}\n\n`;
+      // Extract bullet points from the summary if they exist
+      const summary = primaryCluster.summary;
+      if (summary.includes('•')) {
+        // Split by bullet points and clean up
+        const bulletPoints = summary.split('•').slice(1); // Remove first empty element
+        bulletPoints.forEach((point: string) => {
+          const cleanPoint = point.trim();
+          if (cleanPoint) {
+            markdown += `- ${cleanPoint}\n`;
           }
-          if (cluster.apps && cluster.apps.length > 0) {
-            markdown += `**Apps:** ${cluster.apps.join(', ')}\n\n`;
-          }
-        }
-      });
+        });
+      } else {
+        // If no bullet points, just use the summary as a single point
+        markdown += `- ${summary}\n`;
+      }
+      markdown += '\n';
     }
 
-    // Session metadata
-    markdown += `## Session Details\n\n`;
-    markdown += `- **Duration:** ${parsed.activities_count || 0} activities\n`;
-    markdown += `- **Time Range:** ${parsed.timestamp_start} → ${parsed.timestamp_end}\n`;
-    markdown += `- **Clusters Generated:** ${clusters.length}\n`;
-
-    // Notes if any
-    if (parsed.notes) {
-      markdown += `\n**Notes:** ${parsed.notes}\n`;
+    // Apps used (simple list)
+    if (primaryCluster && primaryCluster.apps && primaryCluster.apps.length > 0) {
+      markdown += `**Applications:** ${primaryCluster.apps.join(', ')}\n\n`;
     }
 
     return markdown.trim();
