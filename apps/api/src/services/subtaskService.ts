@@ -95,6 +95,32 @@ export class SubtaskService {
   }
 
   /**
+   * Check if a task should be excluded from subtask classification
+   */
+  private static shouldExcludeFromSubtasks(task: any): boolean {
+    const title = task.task_title?.toLowerCase() || '';
+    const description = task.task_description?.toLowerCase() || '';
+    
+    // Exclude work start/end logs and administrative activities
+    const isWorkStartEnd = title.includes('work start') || 
+                          title.includes('work end') || 
+                          title.includes('started work') || 
+                          title.includes('ended work') ||
+                          title.includes('work session start') ||
+                          title.includes('work session end') ||
+                          description.includes('work start') ||
+                          description.includes('work end');
+    
+    const isAdministrative = title.includes('administrative') ||
+                            title.includes('system log') ||
+                            title.includes('activity log') ||
+                            title.includes('session start') ||
+                            title.includes('session end');
+    
+    return isWorkStartEnd || isAdministrative;
+  }
+
+  /**
    * Generate embedding for a task's content
    */
   private static async generateTaskEmbedding(task: any): Promise<number[]> {
@@ -253,6 +279,14 @@ export class SubtaskService {
 
       // Build merge prompt
       const prompt = `Combine these two subtasks into one unified version while preserving the shared goal.
+Use business-friendly language that a CEO can understand.
+
+Guidelines for naming:
+- Keep titles 4-8 words and business-focused
+- Use terms like "User Login System" instead of "JWT Authentication Middleware"
+- Focus on business value and user impact
+- Avoid technical jargon and implementation details
+
 Subtask A: { "name": "${subtaskA.subtask_name}", "summary": "${subtaskA.subtask_summary}" }
 Subtask B: { "name": "${subtaskB.subtask_name}", "summary": "${subtaskB.subtask_summary}" }
 
@@ -342,7 +376,13 @@ Return JSON:
 
       // Build mutation prompt
       const prompt = `You are a mutation assistant. Update the subtask summary and name to include the new process log below.
-Preserve the core topic and tone.
+Preserve the core topic and tone. Use business-friendly language that a CEO can understand.
+
+Guidelines for naming:
+- Keep titles 4-8 words and business-focused
+- Use terms like "User Login System" instead of "JWT Authentication Middleware"
+- Focus on business value and user impact
+- Avoid technical jargon and implementation details
 
 Existing subtask:
 {
@@ -463,7 +503,7 @@ Return valid JSON:
   }
 
   /**
-   * Get today's personalized tasks for a user
+   * Get today's personalized tasks for a user, excluding work start/end logs
    */
   private static async getTodaysTasks(userId: string): Promise<PersonalizedTask[]> {
     const today = new Date();
@@ -482,7 +522,12 @@ Return valid JSON:
       return [];
     }
 
-    return data || [];
+    // Filter out work start/end logs and administrative activities
+    const filteredTasks = (data || []).filter(task => !this.shouldExcludeFromSubtasks(task));
+
+    console.log(`📊 Filtered ${(data || []).length} tasks to ${filteredTasks.length} (excluded work start/end logs)`);
+    
+    return filteredTasks;
   }
 
   /**
@@ -532,6 +577,17 @@ Return valid JSON:
       if (newTaskId && existingSubtasks.length > 0) {
         const newTask = tasks.find(t => t.id === newTaskId);
         if (newTask) {
+          // Skip similarity check for work start/end logs
+          if (this.shouldExcludeFromSubtasks(newTask)) {
+            console.log(`⚠️ Skipping similarity check for work start/end log: "${newTask.task_title}"`);
+            return {
+              success: true,
+              message: `Task "${newTask.task_title}" excluded from subtask classification (work start/end log)`,
+              subtasksCreated: 0,
+              subtasksUpdated: 0
+            };
+          }
+          
           console.log(`🔍 Checking semantic similarity for new task: "${newTask.task_title}"`);
           
           try {
@@ -840,12 +896,15 @@ Your job is to group these tasks into logical subtasks based on their intent, to
 Rules:
 1. A subtask represents a higher-level work stream or project that groups related personalized tasks
 2. Group tasks that share similar intent, domain, or are part of the same project
-3. Each subtask should have a clear, descriptive name 8 to 15 words
+3. Each subtask should have a clear, business-focused name 4 to 8 words that a CEO can understand
 4. Each subtask should have a summary with bullet points and a conclusion (40-60 words total)
 5. Summary format: "Work description including: • Bullet point 1 • Bullet point 2 • Bullet point 3. Brief conclusion sentence."
 6. A subtask must contain at least 1 task
 7. If tasks are completely unrelated, create separate subtasks
-8. Use descriptive names like "Backend API development for user authentication" instead of generic names like "Coding"
+8. Use business-friendly names like "User Login System" or "Payment Processing" instead of technical terms like "JWT Authentication Middleware Implementation"
+9. Focus on business value and user impact rather than technical implementation details
+10. Keep titles concise and avoid jargon - they should be readable by non-technical executives
+11. DO NOT create subtasks for work start logs, work end logs, or administrative activities - these should be excluded from subtask classification
 
 Tasks to classify:
 ${JSON.stringify(tasks, null, 2)}
@@ -866,7 +925,7 @@ Examples of good subtasks JSON only:
 {
   "subtasks": [
     {
-      "name": "Backend API development for user authentication and session management",
+      "name": "User Login System",
       "summary": "Authentication system development including: • Built and debugged login and refresh endpoints • Added JWT token rotation for enhanced security • Implemented input validation and error handling • Wrote tests to confirm session lifecycle across protected routes. Successfully established secure authentication flow with proper token management.",
       "task_ids": [101, 108, 112]
     }
@@ -876,7 +935,7 @@ Examples of good subtasks JSON only:
 {
   "subtasks": [
     {
-      "name": "Marketing website redesign for landing pages navigation accessibility and performance",
+      "name": "Website Redesign",
       "summary": "Website redesign and optimization including: • Updated hero and pricing page layouts for better user experience • Simplified navigation structure and improved accessibility • Added ARIA roles and semantic HTML elements • Compressed images and optimized fonts for faster loading • Reduced Largest Contentful Paint and cumulative layout shift. Successfully improved website performance and accessibility standards.",
       "task_ids": [205, 209, 214, 217]
     }
@@ -886,7 +945,7 @@ Examples of good subtasks JSON only:
 {
   "subtasks": [
     {
-      "name": "Data pipeline maintenance for analytics ingestion cleaning and schema validation",
+      "name": "Data Pipeline Fixes",
       "summary": "Data pipeline stabilization including: • Investigated and resolved dropped events in the ingestion process • Added dead letter queue handling for failed records • Normalized payload fields for consistent data structure • Introduced schema versioning with validation rules • Prevented malformed records from reaching the data warehouse. Successfully stabilized the data pipeline with improved error handling and data quality.",
       "task_ids": [301, 302]
     }
@@ -912,7 +971,11 @@ Rules:
 3. Update the subtask summary to reflect all tasks in that group with bullet points and conclusion
 4. Summary format: "Work description including: • Bullet point 1 • Bullet point 2 • Bullet point 3. Brief conclusion sentence."
 5. Maintain consistency with existing subtask names
-6. Each subtask name should be descriptive 8 to 15 words
+6. Each subtask name should be business-focused 4 to 8 words that a CEO can understand
+7. Use business-friendly names like "User Login System" or "Payment Processing" instead of technical terms
+8. Focus on business value and user impact rather than technical implementation details
+9. Keep titles concise and avoid jargon - they should be readable by non-technical executives
+10. DO NOT create subtasks for work start logs, work end logs, or administrative activities - these should be excluded from subtask classification
 
 Output format JSON only, no markdown:
 {

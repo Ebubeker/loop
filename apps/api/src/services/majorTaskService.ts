@@ -1,4 +1,7 @@
 import { supabase } from './database';
+import { EmbeddingAutoGenerator } from './embeddingAutoGenerator';
+import { formatSubtaskContent } from '../utils/generateEmbeddings';
+import EmbeddingService from './embeddingService';
 
 interface MajorTask {
   id?: number;
@@ -128,7 +131,371 @@ export class MajorTaskService {
   }
 
   /**
-   * Classify subtasks into major tasks using Gemini AI
+   * Find the most similar major task using semantic similarity
+   */
+  private static async getMostSimilarMajorTask(
+    userId: string, 
+    subtaskEmbedding: number[]
+  ): Promise<{task: MajorTask | null, similarity: number}> {
+    try {
+      // Use Supabase pgvector similarity search
+      const { data, error } = await supabase.rpc('search_similar_activities', {
+        query_embedding: JSON.stringify(subtaskEmbedding),
+        match_user_id: userId,
+        match_count: 1,
+        similarity_threshold: 0.0, // Get the best match regardless of threshold
+        source_types: ['major_task'] // Only search major tasks
+      });
+
+      if (error) {
+        console.error('Error searching similar major tasks:', error);
+        return { task: null, similarity: 0 };
+      }
+
+      if (!data || data.length === 0) {
+        return { task: null, similarity: 0 };
+      }
+
+      const result = data[0];
+      
+      // Fetch the full major task data
+      const { data: majorTaskData, error: majorTaskError } = await supabase
+        .from('major_tasks')
+        .select('*')
+        .eq('id', result.source_id)
+        .eq('user_id', userId)
+        .single();
+
+      if (majorTaskError || !majorTaskData) {
+        console.error('Error fetching major task data:', majorTaskError);
+        return { task: null, similarity: 0 };
+      }
+
+      return {
+        task: majorTaskData as MajorTask,
+        similarity: result.similarity
+      };
+
+    } catch (error) {
+      console.error('Error in getMostSimilarMajorTask:', error);
+      return { task: null, similarity: 0 };
+    }
+  }
+
+  /**
+   * Mutate an existing major task to integrate a new subtask using Gemini AI
+   */
+  private static async mutateMajorTask(existingTask: MajorTask, newSubtask: Subtask): Promise<void> {
+    try {
+      // Build the mutation prompt
+      const prompt = `You are a major task mutation assistant.
+Update the task name and summary to integrate the new subtask information.
+Preserve the overall project identity.
+
+Existing major task:
+{
+"name": "${existingTask.major_task_title}",
+"summary": "${Array.isArray(existingTask.major_task_summary) ? existingTask.major_task_summary.join('; ') : existingTask.major_task_summary}"
+}
+
+New subtask:
+{
+"name": "${newSubtask.subtask_name}",
+"summary": "${newSubtask.subtask_summary}"
+}
+
+Return valid JSON:
+{
+"name": "updated name",
+"summary": "updated summary"
+}`;
+
+      // Call Gemini API
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const aiResult = response.text();
+
+      // Parse result
+      const cleanedResult = aiResult
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .trim();
+
+      const parsed = JSON.parse(cleanedResult);
+      const updatedName = parsed.name;
+      const updatedSummary = parsed.summary;
+
+      // Update the major task in Supabase
+      const updatedSubtaskIds = [...(existingTask.subtask_ids || []), newSubtask.id];
+      const updatedSummaryArray = Array.isArray(existingTask.major_task_summary) 
+        ? [...existingTask.major_task_summary, `• ${newSubtask.subtask_name}: ${newSubtask.subtask_summary}`]
+        : [updatedSummary, `• ${newSubtask.subtask_name}: ${newSubtask.subtask_summary}`];
+
+      const { error } = await supabase
+        .from('major_tasks')
+        .update({
+          major_task_title: updatedName,
+          major_task_summary: updatedSummaryArray,
+          subtask_ids: updatedSubtaskIds,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingTask.id);
+
+      if (error) {
+        console.error(`❌ Failed to mutate major task:`, error);
+        throw error;
+      }
+
+      console.log(`🌀 Mutated major task: "${updatedName}" based on subtask: ${newSubtask.id}`);
+
+      // Auto-generate updated embedding for this major task (non-blocking)
+      if (existingTask.id) {
+        EmbeddingAutoGenerator.generateForMajorTask(existingTask.id, existingTask.user_id);
+      }
+
+    } catch (error) {
+      console.error('❌ Error mutating major task:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate cosine similarity between two embedding vectors
+   */
+  private static calculateCosineSimilarity(vecA: number[], vecB: number[]): number {
+    if (vecA.length !== vecB.length) {
+      throw new Error('Vectors must have the same length');
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < vecA.length; i++) {
+      dotProduct += vecA[i] * vecB[i];
+      normA += vecA[i] * vecA[i];
+      normB += vecB[i] * vecB[i];
+    }
+
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+
+    if (normA === 0 || normB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (normA * normB);
+  }
+
+  /**
+   * Merge similar major tasks to reduce redundancy
+   */
+  static async mergeSimilarMajorTasks(userId: string): Promise<void> {
+    try {
+      console.log('🔍 Checking for similar major tasks to merge...');
+
+      // Fetch all major tasks for the user
+      const { data: majorTasks, error: fetchError } = await supabase
+        .from('major_tasks')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+
+      if (fetchError) {
+        console.error('❌ Error fetching major tasks for merge:', fetchError);
+        return;
+      }
+
+      if (!majorTasks || majorTasks.length < 2) {
+        console.log('⏭️ Not enough major tasks to merge');
+        return;
+      }
+
+      // Fetch embeddings for all major tasks
+      const { data: embeddings, error: embeddingError } = await supabase
+        .from('activity_embeddings')
+        .select('source_id, embedding')
+        .eq('user_id', userId)
+        .eq('source_type', 'major_task')
+        .in('source_id', majorTasks.map(mt => mt.id.toString()));
+
+      if (embeddingError) {
+        console.error('❌ Error fetching embeddings for merge:', embeddingError);
+        return;
+      }
+
+      // Create a map of task ID to embedding
+      const embeddingMap = new Map<string, number[]>();
+      embeddings?.forEach(emb => {
+        try {
+          embeddingMap.set(emb.source_id, JSON.parse(emb.embedding));
+        } catch (error) {
+          console.warn(`⚠️ Could not parse embedding for task ${emb.source_id}`);
+        }
+      });
+
+      // Compare each pair of major tasks
+      const tasksToMerge: Array<{taskA: MajorTask, taskB: MajorTask, similarity: number}> = [];
+      const processedPairs = new Set<string>();
+
+      for (let i = 0; i < majorTasks.length; i++) {
+        for (let j = i + 1; j < majorTasks.length; j++) {
+          const taskA = majorTasks[i];
+          const taskB = majorTasks[j];
+          const pairKey = `${Math.min(taskA.id, taskB.id)}-${Math.max(taskA.id, taskB.id)}`;
+
+          // Skip if already processed or if tasks don't have embeddings
+          if (processedPairs.has(pairKey) || !embeddingMap.has(taskA.id.toString()) || !embeddingMap.has(taskB.id.toString())) {
+            continue;
+          }
+
+          processedPairs.add(pairKey);
+
+          // Check if they have identical subtask sets
+          const subtasksA = new Set(taskA.subtask_ids || []);
+          const subtasksB = new Set(taskB.subtask_ids || []);
+          const hasIdenticalSubtasks = subtasksA.size === subtasksB.size && 
+            [...subtasksA].every(id => subtasksB.has(id));
+
+          if (hasIdenticalSubtasks) {
+            continue; // Skip if they have identical subtask sets
+          }
+
+          // Calculate cosine similarity
+          const embeddingA = embeddingMap.get(taskA.id.toString())!;
+          const embeddingB = embeddingMap.get(taskB.id.toString())!;
+          const similarity = this.calculateCosineSimilarity(embeddingA, embeddingB);
+
+          if (similarity >= 0.75) {
+            tasksToMerge.push({ taskA, taskB, similarity });
+            console.log(`🔍 Found similar major tasks: "${taskA.major_task_title}" and "${taskB.major_task_title}" (similarity: ${similarity.toFixed(3)})`);
+          }
+        }
+      }
+
+      if (tasksToMerge.length === 0) {
+        console.log('✅ No similar major tasks found for merging');
+        return;
+      }
+
+      console.log(`🔗 Found ${tasksToMerge.length} pairs of similar major tasks to merge`);
+
+      // Process merges
+      for (const { taskA, taskB, similarity } of tasksToMerge) {
+        try {
+          await this.performTaskMerge(taskA, taskB, similarity);
+        } catch (error) {
+          console.error(`❌ Failed to merge tasks ${taskA.id} and ${taskB.id}:`, error);
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ Error in mergeSimilarMajorTasks:', error);
+    }
+  }
+
+  /**
+   * Perform the actual merge of two major tasks
+   */
+  private static async performTaskMerge(taskA: MajorTask, taskB: MajorTask, similarity: number): Promise<void> {
+    try {
+      // Build the merge prompt
+      const prompt = `Combine these two major tasks into one unified version.
+Preserve both goals but produce one clear, coherent summary.
+
+Task A: { "name": "${taskA.major_task_title}", "summary": "${Array.isArray(taskA.major_task_summary) ? taskA.major_task_summary.join('; ') : taskA.major_task_summary}" }
+Task B: { "name": "${taskB.major_task_title}", "summary": "${Array.isArray(taskB.major_task_summary) ? taskB.major_task_summary.join('; ') : taskB.major_task_summary}" }
+
+Return valid JSON:
+{
+"name": "merged major task name",
+"summary": "merged major task summary"
+}`;
+
+      // Call Gemini API
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const aiResult = response.text();
+
+      // Parse result
+      const cleanedResult = aiResult
+        .replace(/```json\n?/g, '')
+        .replace(/```\n?/g, '')
+        .trim();
+
+      const parsed = JSON.parse(cleanedResult);
+      const mergedName = parsed.name;
+      const mergedSummary = parsed.summary;
+
+      // Combine subtask_ids (unique only)
+      const combinedSubtaskIds = [...new Set([...(taskA.subtask_ids || []), ...(taskB.subtask_ids || [])])];
+
+      // Create merged summary array
+      const mergedSummaryArray = Array.isArray(mergedSummary) ? mergedSummary : [mergedSummary];
+
+      // Create new merged record
+      const { data: mergedTask, error: createError } = await supabase
+        .from('major_tasks')
+        .insert({
+          user_id: taskA.user_id,
+          major_task_title: mergedName,
+          major_task_summary: mergedSummaryArray,
+          subtask_ids: combinedSubtaskIds,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error(`❌ Failed to create merged major task:`, createError);
+        throw createError;
+      }
+
+      // Archive the old tasks by adding a prefix to their titles
+      const archivePrefix = '[MERGED] ';
+      
+      // Archive task A
+      await supabase
+        .from('major_tasks')
+        .update({
+          major_task_title: archivePrefix + taskA.major_task_title,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskA.id);
+
+      // Archive task B
+      await supabase
+        .from('major_tasks')
+        .update({
+          major_task_title: archivePrefix + taskB.major_task_title,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskB.id);
+
+      console.log(`🔗 Merged major tasks: ${taskA.id} and ${taskB.id} → "${mergedName}"`);
+
+      // Auto-generate embedding for the merged task (non-blocking)
+      if (mergedTask?.id) {
+        EmbeddingAutoGenerator.generateForMajorTask(mergedTask.id, taskA.user_id);
+      }
+
+    } catch (error) {
+      console.error('❌ Error performing task merge:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Classify subtasks into major tasks using semantic similarity and Gemini AI
    */
   static async classifyIntoMajorTasks(
     userId: string,
@@ -156,7 +523,127 @@ export class MajorTaskService {
       console.log(`📋 Predefined tasks: ${definedTasks.length}`);
       console.log(`🎯 Trigger reason: ${triggerReason}`);
 
-      const prompt = this.buildClassificationPrompt(subtasks, existingMajorTasks, definedTasks);
+      // Initialize embedding service
+      const embeddingService = new EmbeddingService(process.env.GEMINI_API_KEY || '', supabase);
+      
+      // Process subtasks with semantic similarity layer
+      const subtasksToProcess = [];
+      const directlyLinkedSubtasks = [];
+
+      for (const subtask of subtasks) {
+        try {
+          // Generate embedding for the subtask
+          const subtaskForEmbedding = {
+            ...subtask,
+            id: subtask.id.toString() // Convert number to string for formatSubtaskContent
+          };
+          const subtaskContent = formatSubtaskContent(subtaskForEmbedding);
+          const subtaskEmbedding = await embeddingService.generateEmbedding(subtaskContent);
+
+          // Find most similar major task
+          const { task: similarTask, similarity } = await this.getMostSimilarMajorTask(userId, subtaskEmbedding);
+
+          if (similarity >= 0.85) {
+            // High similarity - directly link to existing major task
+            console.log(`🔍 Similar major task found: "${similarTask?.major_task_title}", similarity: ${similarity.toFixed(3)}`);
+            
+            if (similarTask) {
+              // Update the major task to include this subtask
+              const updatedSubtaskIds = [...(similarTask.subtask_ids || []), subtask.id];
+              const updatedSummary = [...(similarTask.major_task_summary || [])];
+              
+              // Add subtask summary to major task summary if not already present
+              const subtaskSummary = `• ${subtask.subtask_name}: ${subtask.subtask_summary}`;
+              if (!updatedSummary.some(summary => summary.includes(subtask.subtask_name))) {
+                updatedSummary.push(subtaskSummary);
+              }
+
+              const { error } = await supabase
+                .from('major_tasks')
+                .update({
+                  major_task_summary: updatedSummary,
+                  subtask_ids: updatedSubtaskIds,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', similarTask.id);
+
+              if (error) {
+                console.error(`❌ Failed to update major task with direct link:`, error);
+                subtasksToProcess.push(subtask);
+              } else {
+                console.log(`✅ Directly linked subtask "${subtask.subtask_name}" to major task "${similarTask.major_task_title}"`);
+                directlyLinkedSubtasks.push(subtask);
+                
+                // Auto-generate updated embedding for this major task (non-blocking)
+                EmbeddingAutoGenerator.generateForMajorTask(similarTask.id!, userId);
+
+                // Trigger merge check for similar major tasks (non-blocking)
+                setImmediate(() => {
+                  this.mergeSimilarMajorTasks(userId).catch(error => {
+                    console.error('❌ Error in merge check after direct linking:', error);
+                  });
+                });
+              }
+            }
+          } else if (similarity >= 0.7 && similarity < 0.85) {
+            // Medium similarity - go through mutation flow
+            console.log(`🔍 Medium similarity found: "${similarTask?.major_task_title}", similarity: ${similarity.toFixed(3)} - will process through mutation flow`);
+            
+            if (similarTask) {
+              try {
+                await this.mutateMajorTask(similarTask, subtask);
+                console.log(`✅ Mutated major task "${similarTask.major_task_title}" with subtask "${subtask.subtask_name}"`);
+                directlyLinkedSubtasks.push(subtask);
+
+                // Trigger merge check for similar major tasks (non-blocking)
+                setImmediate(() => {
+                  this.mergeSimilarMajorTasks(userId).catch(error => {
+                    console.error('❌ Error in merge check after mutation:', error);
+                  });
+                });
+              } catch (error) {
+                console.error(`❌ Failed to mutate major task for subtask ${subtask.id}:`, error);
+                subtasksToProcess.push(subtask);
+              }
+            } else {
+              subtasksToProcess.push(subtask);
+            }
+          } else {
+            // Low similarity - continue to Gemini classification
+            console.log(`🔍 Low similarity (${similarity.toFixed(3)}) - will process through Gemini classification`);
+            subtasksToProcess.push(subtask);
+          }
+
+          // Generate embedding for the subtask (non-blocking)
+          EmbeddingAutoGenerator.generateForSubtask(subtask.id, userId);
+
+        } catch (error) {
+          console.error(`❌ Error processing subtask ${subtask.id} for similarity:`, error);
+          // If similarity check fails, add to processing queue
+          subtasksToProcess.push(subtask);
+        }
+      }
+
+      console.log(`📊 Semantic similarity results: ${directlyLinkedSubtasks.length} directly linked, ${subtasksToProcess.length} to process through Gemini`);
+
+      // If no subtasks need Gemini processing, we're done
+      if (subtasksToProcess.length === 0) {
+        console.log('✅ All subtasks processed through semantic similarity - no Gemini classification needed');
+        
+        // Check and update defined task completion based on time spent
+        console.log('🔍 Checking defined task completion status...');
+        await this.checkAndUpdateTaskCompletion(userId, subtasks);
+
+        return {
+          success: true,
+          message: `Processed ${subtasks.length} subtasks: ${directlyLinkedSubtasks.length} linked via similarity/mutation, 0 processed through Gemini. Merge check triggered.`,
+          majorTasksCreated: 0,
+          majorTasksUpdated: directlyLinkedSubtasks.length
+        };
+      }
+
+      // Process remaining subtasks through Gemini
+      const prompt = this.buildClassificationPrompt(subtasksToProcess, existingMajorTasks, definedTasks);
 
       // Call Gemini API
       const { GoogleGenerativeAI } = await import('@google/generative-ai');
@@ -205,9 +692,15 @@ export class MajorTaskService {
 
             // Auto-generate updated embedding for this major task (non-blocking)
             if (existingMajorTask.id) {
-              const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
               EmbeddingAutoGenerator.generateForMajorTask(existingMajorTask.id, userId);
             }
+
+            // Trigger merge check for similar major tasks (non-blocking)
+            setImmediate(() => {
+              this.mergeSimilarMajorTasks(userId).catch(error => {
+                console.error('❌ Error in merge check after major task update:', error);
+              });
+            });
           }
         } else {
           // Create new major task
@@ -232,9 +725,15 @@ export class MajorTaskService {
 
             // Auto-generate embedding for this major task (non-blocking)
             if (data?.id) {
-              const { EmbeddingAutoGenerator } = await import('./embeddingAutoGenerator');
               EmbeddingAutoGenerator.generateForMajorTask(data.id, userId);
             }
+
+            // Trigger merge check for similar major tasks (non-blocking)
+            setImmediate(() => {
+              this.mergeSimilarMajorTasks(userId).catch(error => {
+                console.error('❌ Error in merge check after major task creation:', error);
+              });
+            });
           }
         }
       }
@@ -245,9 +744,9 @@ export class MajorTaskService {
 
       return {
         success: true,
-        message: `Classified ${subtasks.length} subtasks into ${majorTasks.length} major tasks`,
+        message: `Processed ${subtasks.length} subtasks: ${directlyLinkedSubtasks.length} linked via similarity/mutation, ${subtasksToProcess.length} processed through Gemini. Merge check triggered.`,
         majorTasksCreated: created,
-        majorTasksUpdated: updated
+        majorTasksUpdated: updated + directlyLinkedSubtasks.length
       };
 
     } catch (error: any) {
